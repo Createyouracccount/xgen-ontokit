@@ -59,17 +59,14 @@ src/ontokit/
 ## 근거
 실측: `docs/LLM-free_추출기_프로토타입_실측_2026_07_08.md`, `docs/온톨로지검색_synaptic_vs_XGEN_실측종합_2026_07_07.md` (xgen-levelup/docs).
 
-## XGEN 배포 결합 (private 리포)
+## XGEN 배포 결합 (public 리포)
 
-리포가 private이므로 XGEN 배포 환경에서 인증이 필요하다:
+리포가 public이라 **인증 없이** 설치된다:
 
 ```bash
-# 방법 A — PAT (사내 CI):
-pip install "git+https://x-access-token:${GITHUB_PAT}@github.com/Createyouracccount/xgen-ontokit.git"
-
-# 방법 B — deploy key (권장, 리포 read-only):
-pip install "git+ssh://git@github.com/Createyouracccount/xgen-ontokit.git"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git"
+# 버전 고정(권장): ...xgen-ontokit.git@v0.1.0
 ```
 
 XGEN `pyproject.toml` dependencies 또는 requirements에 위 URL 추가.
-검증됨: 컨테이너에서 GitHub 인증 clone → pip install → import·추출 E2E 동작.
+검증됨: 컨테이너에서 인증 없이 git clone → pip install → import·추출 E2E 동작.
