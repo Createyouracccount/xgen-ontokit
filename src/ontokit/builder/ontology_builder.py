@@ -12,17 +12,19 @@ from typing import Optional
 
 from ..extractors.deterministic_ko import DeterministicKoreanExtractor
 from ..dedup.deterministic import DeterministicDedup
+from ..owl.generator import DeterministicOWLGenerator
 
 
 class OntologyBuilder:
-    """LLM-free 온톨로지 빌더 — 추출기 + 결정적 dedup 조립."""
+    """LLM-free 온톨로지 빌더 — 추출기 + 결정적 dedup + OWL 생성 조립."""
 
-    def __init__(self, extractor=None, dedup=None, *, kiwi=None,
+    def __init__(self, extractor=None, dedup=None, owl_generator=None, *, kiwi=None,
                  domain_words: Optional[list[str]] = None, ner=None,
                  enable_dedup: bool = True):
         self.extractor = extractor or DeterministicKoreanExtractor(
             kiwi=kiwi, ner=ner, domain_words=domain_words)
         self.dedup = dedup or (DeterministicDedup(kiwi=kiwi) if enable_dedup else None)
+        self.owl_generator = owl_generator or DeterministicOWLGenerator()
 
     async def build(
         self,
@@ -43,7 +45,17 @@ class OntologyBuilder:
 
         return concepts, entities, relations, data
 
-    # XGEN pipeline 어댑터 — extract_from_chunk_documents 인터페이스 호환
+    def build_owl(self, concepts: dict, *, domain: str = "xgen-domain") -> dict:
+        """concepts → OWL/TTL (번역 없이 한국어 URI, LLM 0). 대용량 번역 O(N)콜 제거."""
+        return self.owl_generator.generate(concepts, domain_name=domain)
+
+    async def build_full(self, documents, *, domain="", existing=None):
+        """documents → (concepts, entities, relations, data, owl) 전 과정 LLM 0."""
+        c, e, r, d = await self.build(documents, domain=domain, existing=existing)
+        owl = self.build_owl(c, domain=domain or "xgen-domain")
+        return c, e, r, d, owl
+
+    # XGEN pipeline 어댑터 — extract_from_chunk_documents 인터페이스 호환(추출+dedup)
     async def extract_from_chunk_documents(self, documents, domain_name="",
                                            existing_concepts=None, **kwargs):
         return await self.build(documents, domain=domain_name, existing=existing_concepts)

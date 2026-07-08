@@ -18,11 +18,12 @@ from .protocols import Extractor, GraphStore, VectorStore, LLM
 from .extractors.deterministic_ko import DeterministicKoreanExtractor
 from .extractors.base import merge_concepts
 from .dedup.deterministic import DeterministicDedup
+from .owl.generator import DeterministicOWLGenerator
 from .builder.ontology_builder import OntologyBuilder
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "Extractor", "GraphStore", "VectorStore", "LLM",
     "DeterministicKoreanExtractor", "merge_concepts",
-    "DeterministicDedup", "OntologyBuilder",
+    "DeterministicDedup", "DeterministicOWLGenerator", "OntologyBuilder",
 ]
