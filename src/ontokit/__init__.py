@@ -1,0 +1,25 @@
+"""xgen-ontokit — XGEN 온톨로지 빌드·검색 개선 키트.
+
+이번 세션(2026-07)에서 확인·수정한 온톨로지 개선을 하나로 말아 XGEN에 주입하는 라이브러리.
+빌드(LLM-free 한국어 추출)와 검색(계층 전수열거·랭킹 floor) 개선을 함께 담는다.
+
+빌드:
+    from ontokit import DeterministicKoreanExtractor
+    ext = DeterministicKoreanExtractor(domain_words=[...])
+    concepts, entities, relations, data = await ext.extract(documents)
+
+검색 개선:
+    from ontokit.search import class_instances_triple, blend_score
+
+프로토콜(주입 인터페이스):
+    from ontokit import Extractor, GraphStore, VectorStore, LLM
+"""
+from .protocols import Extractor, GraphStore, VectorStore, LLM
+from .extractors.deterministic_ko import DeterministicKoreanExtractor
+from .extractors.base import merge_concepts
+
+__version__ = "0.1.0"
+__all__ = [
+    "Extractor", "GraphStore", "VectorStore", "LLM",
+    "DeterministicKoreanExtractor", "merge_concepts",
+]
