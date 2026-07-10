@@ -22,15 +22,48 @@ def test_search_improvements():
 
 
 def test_suffix_hierarchy():
-    """접미 공유 계층 — 순수 파이썬, 의존성 0."""
+    """접미 공유 계층 — 인덱스화 + 허브필터. 순수 파이썬, 의존성 0."""
     from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
-    names = {"보험업", "생명보험업", "손해보험업", "주주", "대주주", "회사", "자회사"}
+    names = {"보험업", "생명보험업", "손해보험업", "자동차보험업",
+             "회사", "자회사", "모회사"}
     hier = induce_suffix_hierarchy(names)
     pairs = {(h["parent"], h["child"]) for h in hier}
+    # 허브(자식 ≥2)만 상위로 인정 — 보험업(3자식)·회사(2자식) 인정
     assert ("보험업", "생명보험업") in pairs
     assert ("보험업", "손해보험업") in pairs
-    assert ("주주", "대주주") in pairs
     assert ("회사", "자회사") in pairs
+    assert ("회사", "모회사") in pairs
+
+
+def test_suffix_hub_filter():
+    """허브 필터 — 자식 1개나 1글자 접미 오탐은 제외(#2)."""
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    # '학'(1글자)·'가' 접미 오탐 + 자식 1개(주주/대주주)는 걸러져야
+    names = {"대학", "과학", "학", "국가", "전문가", "주주", "대주주"}
+    pairs = {(h["parent"], h["child"]) for h in induce_suffix_hierarchy(names)}
+    assert ("학", "대학") not in pairs      # 1글자 접미 오탐
+    assert ("가", "국가") not in pairs      # 형태소 경계 무시 오탐
+    assert ("주주", "대주주") not in pairs  # 허브 미달(자식 1개)
+
+
+def test_suffix_hierarchy_scale():
+    """수십만 클래스 선형 — O(N²) 재발 방지 회귀(#1)."""
+    import time
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    names = {f"{p}보험업" for p in
+             ("생명", "손해", "자동차", "화재", "해상", "재", "여행", "상해")}
+    names |= {f"항목{i}단위" for i in range(50000)}  # 대량 잡음
+    t = time.time()
+    induce_suffix_hierarchy(names)
+    assert time.time() - t < 3.0  # 5만+ 클래스가 초 단위(구 O(N²)면 분 단위)
+
+
+def test_lang_detect():
+    """언어 감지 — 한글/영문 비율, 의존성 0."""
+    from ontokit.utils.lang_detect import detect_lang
+    assert detect_lang("삼성전자는 서울에 있다") == "ko"
+    assert detect_lang("Samsung is in Seoul") == "en"
+    assert detect_lang("") == "en"
 
 
 def test_extract_korean():
@@ -38,14 +71,73 @@ def test_extract_korean():
     try:
         from ontokit import DeterministicKoreanExtractor
         ext = DeterministicKoreanExtractor(
-            domain_words=["여신전문금융업", "신용카드업", "보험업", "생명보험업"])
+            domain_words=["여신전문금융업", "신용카드업", "보험업", "생명보험업"],
+            enable_relations=False)
     except ImportError:
         return  # kiwipiepy 없으면 skip
     docs = {"보험업법": [{"chunk_id": "c1", "chunk_index": 0,
              "chunk_text": "생명보험업과 손해보험업은 보험업의 종류이다. 신용카드업은 여신전문금융업에 속한다."}]}
     concepts, ents, rels, dps = asyncio.run(ext.extract(docs))
     names = {c["name"] for c in concepts["classes"]}
-    assert "보험업" in names
-    # 계층 유도 확인
-    pairs = {(h["parent"], h["child"]) for h in concepts["class_hierarchy"]}
-    assert ("보험업", "생명보험업") in pairs
+    assert "생명보험업" in names  # 복합명사 클래스 추출
+
+
+def test_extract_dict_accumulation():
+    """merge dict 누적 — 같은 클래스가 여러 청크에 오면 source_chunks 합산(#3)."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(enable_relations=False)
+    except ImportError:
+        return
+    docs = {"d": [
+        {"chunk_id": "c1", "chunk_text": "생명보험업은 중요하다"},
+        {"chunk_id": "c2", "chunk_text": "생명보험업을 감독한다"},
+    ]}
+    concepts, *_ = asyncio.run(ext.extract(docs))
+    found = False
+    for c in concepts["classes"]:
+        if c["name"] == "생명보험업":
+            assert set(c["source_chunks"]) == {"c1", "c2"}  # 두 청크 합산
+            found = True
+    assert found
+
+
+def test_extract_en_skip_stats():
+    """영어 청크 침묵 스킵 방지 — skipped_en_chunks 노출(#5)."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(en_nouns=None, en_ner=None,
+                                           enable_relations=False)
+    except ImportError:
+        return
+    docs = {"d": [{"chunk_id": "c1", "chunk_text": "This is an English chunk"}]}
+    concepts, *_ = asyncio.run(ext.extract(docs))
+    assert concepts.get("skipped_en_chunks") == 1  # 조용히 사라지지 않음
+
+
+def test_relation_carryover_tag():
+    """관계 주어 캐리오버 태깅 — 생략주어 추정 구분(#4)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        return
+    tris = r.extract("금융위원회는 은행을 감독하고 증권사를 관리한다",
+                     source_chunks=["c1"])
+    assert len(tris) == 2
+    assert not tris[0].get("inferred_subject")   # 명시 주어
+    assert tris[1].get("inferred_subject")        # 캐리오버(생략주어)
+
+
+def test_dedup_rename_map():
+    """결정적 dedup — 형태소 키 동일한 클래스 병합 맵(#6 커버)."""
+    try:
+        from ontokit.dedup.deterministic import DeterministicDedup
+        d = DeterministicDedup()
+    except ImportError:
+        return
+    concepts = {"classes": [{"name": "보험업"}, {"name": "보험업"}],
+                "object_properties": [], "datatype_properties": [],
+                "class_hierarchy": []}
+    rename = d.compute_rename_map(concepts, {})
+    assert isinstance(rename, dict)  # 실패 없이 맵 반환

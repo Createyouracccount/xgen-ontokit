@@ -53,6 +53,11 @@ class KoreanRelationExtractor:
         """한 문장에서 (subject, predicate, object) 트리플. 조사로 역할 판별."""
         toks = self.kiwi.tokenize(sent)
         subject = obj = predicate = ""
+        # 첫 트리플의 주어는 이 문장에서 명시된 주어. 이후 트리플이 같은 주어를 재사용
+        # (주어 생략 대비 캐리오버)하면 inferred_subject=True 로 태깅해 하류가 신뢰도를
+        # 구분하게 한다. 문장 분리 실패한 긴 문단에서 앞 절 주어가 뒷 절에 잘못 엮이는
+        # 오연결의 잠재 위험을 침묵시키지 않기 위함(#4).
+        subject_used = False
         noun_buf: list[str] = []
         out: list[dict] = []
         # 직전 토큰의 끝 위치(문자 오프셋). 명사 사이 띄어쓰기 감지에 쓴다. (아래 설명)
@@ -90,6 +95,7 @@ class KoreanRelationExtractor:
                 cand = self._flush_noun(noun_buf)
                 if cand:
                     subject = cand
+                    subject_used = False  # 새 주어 명시 — 다음 트리플은 캐리오버 아님
             elif t.tag == "JKO":                # 을/를 → 목적어
                 cand = self._flush_noun(noun_buf)
                 if cand:
@@ -103,8 +109,13 @@ class KoreanRelationExtractor:
                         predicate = pred_cand
                         # 술어 완성 시점에 S·P·O 다 있으면 트리플 확정
                         if subject and obj and predicate and subject != obj:
-                            out.append({"subject": subject, "predicate": predicate,
-                                        "object": obj})
+                            tri = {"subject": subject, "predicate": predicate,
+                                   "object": obj}
+                            # 같은 주어를 두 번째 이상 재사용 = 캐리오버(생략주어 추정).
+                            if subject_used:
+                                tri["inferred_subject"] = True
+                            subject_used = True
+                            out.append(tri)
                             # 다음 절 대비 목적어·술어 리셋(주어는 생략 대비 유지)
                             obj = predicate = ""
             noun_buf = []

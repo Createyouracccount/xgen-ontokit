@@ -11,7 +11,6 @@ from typing import Optional
 from ..morphology.kiwi_nouns import KiwiNounExtractor
 from ..hierarchy.suffix_share import induce_suffix_hierarchy
 from ..utils.lang_detect import detect_lang
-from .base import merge_concepts
 
 
 class DeterministicKoreanExtractor:
@@ -47,11 +46,23 @@ class DeterministicKoreanExtractor:
         domain: str = "",
         existing: Optional[dict] = None,
     ) -> tuple[dict, dict, list, list]:
-        merged = existing or {"classes": [], "object_properties": [],
-                              "datatype_properties": [], "class_hierarchy": []}
         all_entities: dict[str, list] = {}
         all_relations: list = []
         all_data_props: list = []
+
+        # 클래스 이름 → source_chunks(set) 딕셔너리 누적 — 매 청크 merge_concepts(O(T·C),
+        # 내부 리스트 선형탐색까지 겹쳐 사실상 제곱)를 폐기. 청크당 O(1) dict 갱신 후
+        # 루프 밖에서 1회 리스트화. existing(이어서 빌드) 클래스도 이 dict 로 흡수한다.
+        class_chunks: dict[str, set] = {}
+        if existing:
+            for c in existing.get("classes", []):
+                nm = c.get("name")
+                if nm:
+                    class_chunks.setdefault(nm, set()).update(c.get("source_chunks", []))
+
+        # en 라우팅 침묵 방지(#5) — 영어 청크인데 영어 도구 미주입이면 조용히 스킵되던 것을
+        # stats 로 노출. "문서 500 조용한 누락" 류 함정 재발 차단.
+        skipped_en_chunks = 0
 
         for doc_name, chunks in documents.items():
             for ch in chunks:
@@ -62,17 +73,18 @@ class DeterministicKoreanExtractor:
                 sc = [cid] if cid else []
                 # 청크 언어 감지 → 언어별 도구 라우팅(형태소·NER)
                 lang = detect_lang(text)
-                if lang == "en" and self.en_nouns is not None:
+                if lang == "en":
+                    if self.en_nouns is None:
+                        skipped_en_chunks += 1
+                        continue  # 영어 도구 없음 — Kiwi 로 폴백해봐야 빈 결과, 명시적 스킵
                     nouns = self.en_nouns.compound_nouns(text)
                     ner = self.en_ner
                 else:
-                    # 한국어(또는 영어 도구 미주입 시 폴백) — 영어 도구 없으면
-                    # 영어 청크는 Kiwi 가 한글 0개라 사실상 빈 결과(안전).
                     nouns = self.nouns.compound_nouns(text)
                     ner = self.ner
-                # ① 복합명사 → 클래스
-                doc_classes = [{"name": n, "description": "", "parent": None,
-                                "source_chunks": sc} for n in nouns]
+                # ① 복합명사 → 클래스 (dict 누적, O(1))
+                for n in nouns:
+                    class_chunks.setdefault(n, set()).update(sc)
                 # ② NER → 인스턴스 엔티티 (언어별 NER)
                 if ner is not None:
                     ents = ner.entities(text, source_chunks=sc)
@@ -83,17 +95,22 @@ class DeterministicKoreanExtractor:
                     rels = self.relations.extract(text, source_chunks=sc)
                     if rels:
                         all_relations.extend(rels)
-                merged = merge_concepts(merged, {
-                    "classes": doc_classes, "object_properties": [],
-                    "datatype_properties": [], "class_hierarchy": []})
 
-        # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관).
+        # 루프 밖 1회 리스트화 — merged 스키마 구성.
+        merged = {
+            "classes": [{"name": nm, "description": "", "parent": None,
+                         "source_chunks": list(chunks)}
+                        for nm, chunks in class_chunks.items()],
+            "object_properties": list(existing.get("object_properties", [])) if existing else [],
+            "datatype_properties": list(existing.get("datatype_properties", [])) if existing else [],
+            "class_hierarchy": list(existing.get("class_hierarchy", [])) if existing else [],
+        }
+        if skipped_en_chunks:
+            merged["skipped_en_chunks"] = skipped_en_chunks
+
+        # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관). 인덱스화+허브필터(O(N·L²)).
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업).
-        #   고순도. 정의문(Hearst) 계층은 실측상 노이즈가 이득을 상쇄해 미채택 —
-        #   불용어 목록 수동관리는 지속불가능한 방식이라 제거했다(관리포인트 참고).
-        all_names = {c["name"] for c in merged["classes"]}
-        merged = merge_concepts(merged, {
-            "classes": [], "object_properties": [], "datatype_properties": [],
-            "class_hierarchy": induce_suffix_hierarchy(all_names)})
+        #   정의문(Hearst) 계층은 실측상 노이즈가 이득을 상쇄해 미채택.
+        merged["class_hierarchy"].extend(induce_suffix_hierarchy(set(class_chunks.keys())))
 
         return merged, all_entities, all_relations, all_data_props

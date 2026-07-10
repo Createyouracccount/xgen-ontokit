@@ -27,7 +27,9 @@ concepts, entities, relations, data = await ext.extract(documents)
 # concepts.class_hierarchy 에 subClassOf 계층(접미공유), source_chunks 태깅 포함
 ```
 finreg 489 실측: **4.5초 / $0** (gpt-4o 23분/$2 대비), 클래스 3156·subClassOf 1710.
-검색 A/B: gpt-4o 빌드와 **Recall@10 완전 동일(0.947)** — 벡터 leg가 검색 캐리, 빌드 방식 무관.
+검색 A/B: gpt-4o 빌드와 Recall@10 동일(0.947). ⚠️ 단 이 지표는 **벡터 leg(임베딩+FTS)가
+recall을 캐리**하므로 *빌드 방식 차이를 측정하지 못한다*(LLM/LLM-free 구분 불가). 계층·관계
+품질은 검색 recall 이 아니라 계층 카운트/전수열거/관계 GT 로 따로 측정해야 한다(로드맵 참조).
 
 ## 검색 개선
 ```python
@@ -65,7 +67,7 @@ src/ontokit/
 
 ```bash
 pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git"
-# 버전 고정(권장): ...xgen-ontokit.git@v0.1.0
+# 버전 고정(권장): ...xgen-ontokit.git@v0.5.0
 ```
 
 XGEN `pyproject.toml` dependencies 또는 requirements에 위 URL 추가.
