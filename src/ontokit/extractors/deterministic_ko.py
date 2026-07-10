@@ -6,6 +6,7 @@ finreg 489 실측: 4.5초/$0, 클래스 3156·subClassOf 1710. 검색 A/B에서 
 XGEN pipeline은 이것을 gpt-4o DocumentOntologyExtractor 대신 주입 가능(같은 4-tuple 계약).
 """
 from __future__ import annotations
+import asyncio
 from typing import Optional
 
 from ..morphology.kiwi_nouns import KiwiNounExtractor
@@ -39,7 +40,44 @@ class DeterministicKoreanExtractor:
                 from .relation_ko import KoreanRelationExtractor
                 self.relations = KoreanRelationExtractor(kiwi=self.nouns.kiwi)
 
+    @staticmethod
+    def _run_ner_batched(ner, buf: list[tuple[str, str, list]],
+                         all_entities: dict[str, list]) -> None:
+        """수집된 (doc_name, text, sc) 버퍼를 배치 NER 로 추론해 all_entities 에 병합.
+
+        entities_batch 미구현 NER(커스텀 주입)은 청크별 entities() 폴백 — 결과 동일,
+        속도만 단건. 내장 KoElectraNER/EnglishNER 는 배치 경로."""
+        if ner is None or not buf:
+            return
+        texts = [t for _, t, _ in buf]
+        scs = [sc for _, _, sc in buf]
+        batch_fn = getattr(ner, "entities_batch", None)
+        if batch_fn is not None:
+            results = batch_fn(texts, source_chunks_list=scs)
+        else:
+            results = [ner.entities(t, source_chunks=sc) for t, sc in zip(texts, scs)]
+        for (doc_name, _, _), ents in zip(buf, results):
+            if ents:
+                all_entities.setdefault(doc_name, []).extend(ents)
+
     async def extract(
+        self,
+        documents: dict[str, list[dict]],
+        *,
+        domain: str = "",
+        existing: Optional[dict] = None,
+    ) -> tuple[dict, dict, list, list]:
+        """비동기 진입점 — CPU 본문을 워커 스레드로 격리.
+
+        본문(Kiwi 형태소·NER 추론)은 100% 동기 CPU 라, 이벤트 루프에서 직접 돌면
+        그룹(100청크)당 수십 초씩 루프가 통째로 멈춘다(0710 mixed20k 실증: 폴링·
+        헬스체크·로그 전부 마비 → "NER CPU 추론 무한정지"로 job failed). to_thread
+        격리로 서버는 살아있고, 호출측(pipeline)의 그룹 사이 취소 체크도 동작한다.
+        Kiwi·torch 는 C 확장이라 추론 중 GIL 을 놓아 메인 루프 응답성이 유지된다."""
+        return await asyncio.to_thread(
+            self._extract_sync, documents, domain=domain, existing=existing)
+
+    def _extract_sync(
         self,
         documents: dict[str, list[dict]],
         *,
@@ -64,6 +102,11 @@ class DeterministicKoreanExtractor:
         # stats 로 노출. "문서 500 조용한 누락" 류 함정 재발 차단.
         skipped_en_chunks = 0
 
+        # NER 배치 수집 버퍼 — 청크별 단건 forward(CPU 891ms/청크, 2만 청크=297분)를
+        # 언어별로 모아 배치 forward(430ms/청크)로 바꾼다. (doc_name, text, sc) 튜플.
+        ko_ner_buf: list[tuple[str, str, list]] = []
+        en_ner_buf: list[tuple[str, str, list]] = []
+
         for doc_name, chunks in documents.items():
             for ch in chunks:
                 cid = ch.get("chunk_id")
@@ -78,23 +121,24 @@ class DeterministicKoreanExtractor:
                         skipped_en_chunks += 1
                         continue  # 영어 도구 없음 — Kiwi 로 폴백해봐야 빈 결과, 명시적 스킵
                     nouns = self.en_nouns.compound_nouns(text)
-                    ner = self.en_ner
+                    if self.en_ner is not None:
+                        en_ner_buf.append((doc_name, text, sc))
                 else:
                     nouns = self.nouns.compound_nouns(text)
-                    ner = self.ner
+                    if self.ner is not None:
+                        ko_ner_buf.append((doc_name, text, sc))
                 # ① 복합명사 → 클래스 (dict 누적, O(1))
                 for n in nouns:
                     class_chunks.setdefault(n, set()).update(sc)
-                # ② NER → 인스턴스 엔티티 (언어별 NER)
-                if ner is not None:
-                    ents = ner.entities(text, source_chunks=sc)
-                    if ents:
-                        all_entities.setdefault(doc_name, []).extend(ents)
                 # ③ 관계(objectProperty) — 조사 기반 SVO. 한국어 청크만(영어는 조사 없음).
                 if self.relations is not None and lang != "en":
                     rels = self.relations.extract(text, source_chunks=sc)
                     if rels:
                         all_relations.extend(rels)
+
+        # ② NER → 인스턴스 엔티티 — 언어별 배치 forward 1회.
+        self._run_ner_batched(self.ner, ko_ner_buf, all_entities)
+        self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)
 
         # 루프 밖 1회 리스트화 — merged 스키마 구성.
         merged = {

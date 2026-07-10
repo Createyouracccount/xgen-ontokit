@@ -34,3 +34,28 @@ class KoElectraNER:
         except Exception:
             pass
         return out
+
+    def entities_batch(self, texts: list[str], *, source_chunks_list: list[list[str]],
+                       max_len: int = 512, batch_size: int = 32) -> list[list[dict]]:
+        """여러 청크를 배치 forward 로 추론 — CPU 실측 891ms→430ms/청크(2배).
+
+        청크별 entities() 반복은 forward 를 청크 수만큼 개별 실행해 대용량(2만 청크)
+        에서 완주 불가(0710 mixed20k 실측: 단건 297분 vs 배치32 143분 추정).
+        반환: texts 와 같은 순서의 리스트-of-리스트(i번째 = texts[i]의 엔티티).
+        배치 전체 실패 시 빈 결과(단건 entities 와 동일한 실패 격리)."""
+        self._ensure()
+        results: list[list[dict]] = [[] for _ in texts]
+        if not texts:
+            return results
+        try:
+            batched = self._pipe([t[:max_len] for t in texts], batch_size=batch_size)
+        except Exception:
+            return results
+        for i, ents in enumerate(batched):
+            sc = source_chunks_list[i]
+            for e in ents or []:
+                w = (e.get("word", "") or "").replace("##", "").strip()
+                if len(w) >= 2:
+                    results[i].append({"entity": w, "class": e.get("entity_group", "ENTITY"),
+                                       "type": "INSTANCE", "source_chunks": sc})
+        return results

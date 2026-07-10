@@ -8,6 +8,7 @@ XGEN pipeline 은 이 빌더를 주입해 build() 결과(4-tuple)를 받아 OWL/
 dedup 정책(LLM 스킵·형태소 정규화)이 전부 라이브러리에 있어 XGEN 오염 0.
 """
 from __future__ import annotations
+import asyncio
 from typing import Optional
 
 from ..extractors.deterministic_ko import DeterministicKoreanExtractor
@@ -40,9 +41,12 @@ class OntologyBuilder:
             documents, domain=domain, existing=existing)
 
         if self.dedup is not None:
-            rename = self.dedup.compute_rename_map(concepts, entities)
-            concepts, entities, relations, data = self.dedup.apply(
-                rename, concepts, entities, relations, data)
+            # dedup 도 동기 CPU(Kiwi 형태소 분석 × 클래스 수) — 수만 클래스면 수십 초
+            # 이벤트 루프 블록이라 추출과 동일하게 워커 스레드로 격리.
+            def _dedup_sync():
+                rename = self.dedup.compute_rename_map(concepts, entities)
+                return self.dedup.apply(rename, concepts, entities, relations, data)
+            concepts, entities, relations, data = await asyncio.to_thread(_dedup_sync)
 
         return concepts, entities, relations, data
 

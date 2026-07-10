@@ -35,3 +35,23 @@ class EnglishNER:
         except Exception:
             pass
         return out
+
+    def entities_batch(self, texts: list[str], *, source_chunks_list: list[list[str]],
+                       max_len: int = 512, batch_size: int = 32) -> list[list[dict]]:
+        """배치 forward 추론 — KoElectraNER.entities_batch 와 동일 계약(대용량 완주용)."""
+        self._ensure()
+        results: list[list[dict]] = [[] for _ in texts]
+        if not texts:
+            return results
+        try:
+            batched = self._pipe([t[:max_len] for t in texts], batch_size=batch_size)
+        except Exception:
+            return results
+        for i, ents in enumerate(batched):
+            sc = source_chunks_list[i]
+            for e in ents or []:
+                w = (e.get("word", "") or "").replace("##", "").strip()
+                if len(w) >= 2:
+                    results[i].append({"entity": w, "class": e.get("entity_group", "ENTITY"),
+                                       "type": "INSTANCE", "source_chunks": sc})
+        return results
