@@ -16,7 +16,8 @@ from .base import merge_concepts
 
 class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
-                 en_nouns=None, en_ner=None):
+                 en_nouns=None, en_ner=None, relation_extractor=None,
+                 enable_relations: bool = True):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
         domain_words: 사용자사전 도메인 용어.
@@ -30,6 +31,14 @@ class DeterministicKoreanExtractor:
         self.ner = ner
         self.en_nouns = en_nouns
         self.en_ner = en_ner
+        # 한국어 관계(objectProperty) 추출 — 조사 기반 SVO. Kiwi 인스턴스 공유.
+        self.relations = None
+        if enable_relations:
+            if relation_extractor is not None:
+                self.relations = relation_extractor
+            else:
+                from .relation_ko import KoreanRelationExtractor
+                self.relations = KoreanRelationExtractor(kiwi=self.nouns.kiwi)
 
     async def extract(
         self,
@@ -69,11 +78,16 @@ class DeterministicKoreanExtractor:
                     ents = ner.entities(text, source_chunks=sc)
                     if ents:
                         all_entities.setdefault(doc_name, []).extend(ents)
+                # ③ 관계(objectProperty) — 조사 기반 SVO. 한국어 청크만(영어는 조사 없음).
+                if self.relations is not None and lang != "en":
+                    rels = self.relations.extract(text, source_chunks=sc)
+                    if rels:
+                        all_relations.extend(rels)
                 merged = merge_concepts(merged, {
                     "classes": doc_classes, "object_properties": [],
                     "datatype_properties": [], "class_hierarchy": []})
 
-        # ③ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관)
+        # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관)
         all_names = {c["name"] for c in merged["classes"]}
         merged = merge_concepts(merged, {
             "classes": [], "object_properties": [], "datatype_properties": [],
