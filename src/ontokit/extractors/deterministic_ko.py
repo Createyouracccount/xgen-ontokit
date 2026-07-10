@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..morphology.kiwi_nouns import KiwiNounExtractor
 from ..hierarchy.suffix_share import induce_suffix_hierarchy
+from ..hierarchy.hearst_ko import definitional_pairs, copula_pairs
 from ..utils.lang_detect import detect_lang
 from .base import merge_concepts
 
@@ -17,7 +18,7 @@ from .base import merge_concepts
 class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
                  en_nouns=None, en_ner=None, relation_extractor=None,
-                 enable_relations: bool = True):
+                 enable_relations: bool = True, enable_hearst: bool = False):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
         domain_words: 사용자사전 도메인 용어.
@@ -39,6 +40,14 @@ class DeterministicKoreanExtractor:
             else:
                 from .relation_ko import KoreanRelationExtractor
                 self.relations = KoreanRelationExtractor(kiwi=self.nouns.kiwi)
+        # 한국어 Hearst 정의문 계층 — 접미공유가 못 잡는 이질 상위어 보완 목적.
+        # ⚠️ 기본 OFF. 실측(위키 30문서 + finreg 489) 결과 두 방식 모두 노이즈가
+        #   이득을 상쇄: 계사(위키체)는 정밀도 ~40%(계사가 동일성/은유/부가절도 표현),
+        #   따옴표(법령체)는 "정의문 마지막 명사=상위"가 서술구조라 오탐(생명보험업⊂영업).
+        #   접미공유(고순도)가 주 엔진이고 Hearst 는 순이득이 안 나 기본 비활성.
+        #   향후 KorLex/CoreNet 계층 검증을 결합해 후보를 걸러내면 켤 가치가 생긴다
+        #   (설계서 기법 22). 코드는 그때/정형도메인 실험을 위해 보존.
+        self.enable_hearst = enable_hearst
 
     async def extract(
         self,
@@ -52,6 +61,8 @@ class DeterministicKoreanExtractor:
         all_entities: dict[str, list] = {}
         all_relations: list = []
         all_data_props: list = []
+        # Hearst 정의문 계층 후보(parent/child). 접미공유와 함께 마지막에 병합.
+        all_hearst: list = []
 
         for doc_name, chunks in documents.items():
             for ch in chunks:
@@ -83,14 +94,37 @@ class DeterministicKoreanExtractor:
                     rels = self.relations.extract(text, source_chunks=sc)
                     if rels:
                         all_relations.extend(rels)
+                # ④ Hearst 정의문 계층 — 한국어 청크만. 법령체(따옴표)+위키체(계사).
+                #   접미공유(⑤)가 접미 안 겹치는 이질 상위어를 못 잡는 것을 보완.
+                if self.enable_hearst and lang != "en":
+                    all_hearst.extend(
+                        definitional_pairs(text, self.nouns.last_noun))
+                    all_hearst.extend(copula_pairs(text, self.nouns.kiwi))
                 merged = merge_concepts(merged, {
                     "classes": doc_classes, "object_properties": [],
                     "datatype_properties": [], "class_hierarchy": []})
 
-        # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관)
+        # ⑤ 계층 확정: 접미공유(전역 1회) + Hearst 정의문을 함께 병합.
+        #   - 접미공유: child/parent 가 이미 클래스인 것끼리 접미 매칭(청크 경계 무관).
+        #   - Hearst: 정의문에서 나온 parent(상위어)가 클래스 집합에 없을 수 있으므로,
+        #     계층에 쓰인 상위어를 클래스로도 등록해 고아 subClassOf(하위파이프라인
+        #     post_build_fixer 가 제거)로 버려지지 않게 한다.
         all_names = {c["name"] for c in merged["classes"]}
+        hearst_edges = [
+            h for h in all_hearst
+            if h.get("parent") and h.get("child")
+            and h["parent"] != h["child"]
+        ]
+        # Hearst 상위어/하위어를 클래스로 편입(누락분만).
+        new_cls = []
+        for h in hearst_edges:
+            for name in (h["parent"], h["child"]):
+                if name not in all_names:
+                    all_names.add(name)
+                    new_cls.append({"name": name, "description": "",
+                                    "parent": None, "source_chunks": []})
         merged = merge_concepts(merged, {
-            "classes": [], "object_properties": [], "datatype_properties": [],
-            "class_hierarchy": induce_suffix_hierarchy(all_names)})
+            "classes": new_cls, "object_properties": [], "datatype_properties": [],
+            "class_hierarchy": induce_suffix_hierarchy(all_names) + hearst_edges})
 
         return merged, all_entities, all_relations, all_data_props
