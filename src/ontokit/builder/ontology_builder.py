@@ -20,9 +20,10 @@ class OntologyBuilder:
 
     def __init__(self, extractor=None, dedup=None, owl_generator=None, *, kiwi=None,
                  domain_words: Optional[list[str]] = None, ner=None,
-                 enable_dedup: bool = True):
+                 en_nouns=None, en_ner=None, enable_dedup: bool = True):
         self.extractor = extractor or DeterministicKoreanExtractor(
-            kiwi=kiwi, ner=ner, domain_words=domain_words)
+            kiwi=kiwi, ner=ner, domain_words=domain_words,
+            en_nouns=en_nouns, en_ner=en_ner)
         self.dedup = dedup or (DeterministicDedup(kiwi=kiwi) if enable_dedup else None)
         self.owl_generator = owl_generator or DeterministicOWLGenerator()
 

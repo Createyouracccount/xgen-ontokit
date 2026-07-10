@@ -20,10 +20,14 @@ from .extractors.base import merge_concepts
 from .dedup.deterministic import DeterministicDedup
 from .owl.generator import DeterministicOWLGenerator
 from .builder.ontology_builder import OntologyBuilder
+from .morphology.en_nouns import EnglishNounExtractor
+from .ner.english import EnglishNER
+from .utils.lang_detect import detect_lang
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     "Extractor", "GraphStore", "VectorStore", "LLM",
     "DeterministicKoreanExtractor", "merge_concepts",
     "DeterministicDedup", "DeterministicOWLGenerator", "OntologyBuilder",
+    "EnglishNounExtractor", "EnglishNER", "detect_lang",
 ]

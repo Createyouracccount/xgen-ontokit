@@ -1,20 +1,21 @@
 [project]
 name = "xgen-ontokit"
-version = "0.1.0"
+version = "0.4.0"
 description = "XGEN 온톨로지 빌드·검색 개선 키트 — LLM-free 한국어 추출 + 계층 검색. 백엔드 무관, 코어 의존성 0."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []   # 코어 의존성 0 (omnifuse 철학). 백엔드·모델은 extras로만.
 
 [project.optional-dependencies]
-korean = ["kiwipiepy>=0.18"]            # 형태소·복합명사
-ner = ["transformers>=4.40", "torch>=2.0"]  # KoELECTRA NER
+korean = ["kiwipiepy>=0.18"]            # 형태소·복합명사(한국어)
+english = ["nltk>=3.8"]                  # 영어 명사구 추출(POS)
+ner = ["transformers>=4.40", "torch>=2.0"]  # KoELECTRA(ko)·dslim BERT(en) NER
 discover = ["soynlp>=0.0.5"]            # 도메인 신조어 자동 발굴
 owl = ["rdflib>=6.0"]                   # 결정적 OWL/TTL 생성
 fuseki = ["httpx>=0.27"]               # GraphStore 백엔드
 qdrant = ["qdrant-client>=1.12"]       # VectorStore 백엔드
 dev = ["pytest>=8", "ruff>=0.5"]
-all = ["kiwipiepy>=0.18", "transformers>=4.40", "torch>=2.0",
+all = ["kiwipiepy>=0.18", "nltk>=3.8", "transformers>=4.40", "torch>=2.0",
        "soynlp>=0.0.5", "rdflib>=6.0", "httpx>=0.27", "qdrant-client>=1.12"]
 
 [build-system]

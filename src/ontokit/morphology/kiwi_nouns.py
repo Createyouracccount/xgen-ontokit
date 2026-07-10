@@ -34,27 +34,54 @@ class KiwiNounExtractor:
                 except Exception:
                     pass
 
-    def compound_nouns(self, text: str) -> list[str]:
-        """연속 NNG/NNP를 결합해 복합명사 후보. 2자+·불용어 제외·순수 한글·중복 제거."""
+    # 클래스 후보 품질 상한 — 연속 명사가 과결합되면(예: "단편작품상중편작품상독립단체상")
+    # 무의미한 긴 문자열이 클래스로 폭발. 형태소 수/길이 상한으로 컷.
+    MAX_MORPHS = 4     # 결합 형태소 최대 개수 (초과 = 과결합 노이즈)
+    MAX_LEN = 20       # 결합 결과 최대 글자수
+
+    def compound_nouns(self, text: str, *, require_compound: bool = True) -> list[str]:
+        """연속 NNG/NNP를 결합해 복합명사 후보.
+
+        클래스 품질 필터:
+        - 단일 일반명사(NNG 1개, 예: 형벌/비율/발급)는 클래스 부적격 → 제외
+          (단, 단일 고유명사 NNP 는 유지 — 개체 타입일 수 있음).
+        - 복합명사(2+ 형태소 결합)는 유지.
+        - 과결합(MAX_MORPHS/MAX_LEN 초과)·불용어·비한글·중복 제외.
+        require_compound=False 면 단일 NNG 도 허용(구버전 호환, last_noun 등 내부용).
+        """
         toks = self.kiwi.tokenize(text)
-        out, buf = [], []
+        out: list[tuple[str, int, bool]] = []  # (표면형, 형태소수, 고유명사포함)
+        buf: list[str] = []
+        buf_has_nnp = False
         for t in toks:
             if t.tag in ("NNG", "NNP"):
                 buf.append(t.form)
+                if t.tag == "NNP":
+                    buf_has_nnp = True
             else:
                 if buf:
-                    out.append("".join(buf) if len(buf) > 1 else buf[0])
-                    buf = []
+                    surf = "".join(buf) if len(buf) > 1 else buf[0]
+                    out.append((surf, len(buf), buf_has_nnp))
+                    buf, buf_has_nnp = [], False
         if buf:
-            out.append("".join(buf) if len(buf) > 1 else buf[0])
+            surf = "".join(buf) if len(buf) > 1 else buf[0]
+            out.append((surf, len(buf), buf_has_nnp))
         seen, res = set(), []
-        for n in out:
-            if len(n) >= 2 and n not in STOP_HEAD and _HANGUL_NOUN.fullmatch(n) and n not in seen:
-                seen.add(n)
-                res.append(n)
+        for surf, n_morph, has_nnp in out:
+            if not (len(surf) >= 2 and _HANGUL_NOUN.fullmatch(surf)):
+                continue
+            if surf in STOP_HEAD or surf in seen:
+                continue
+            if n_morph > self.MAX_MORPHS or len(surf) > self.MAX_LEN:
+                continue  # 과결합 노이즈
+            # 단일 일반명사(NNG 1개)는 클래스 부적격 — 고유명사거나 복합만 통과
+            if require_compound and n_morph == 1 and not has_nnp:
+                continue
+            seen.add(surf)
+            res.append(surf)
         return res
 
     def last_noun(self, s: str) -> str:
-        """구절의 마지막 복합명사 — 술어·조사 제거."""
-        nouns = self.compound_nouns(s)
+        """구절의 마지막 복합명사 — 술어·조사 제거. 계층 접미사용이라 단일명사도 허용."""
+        nouns = self.compound_nouns(s, require_compound=False)
         return nouns[-1] if nouns else ""
