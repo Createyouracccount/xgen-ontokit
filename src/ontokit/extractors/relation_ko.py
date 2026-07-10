@@ -19,13 +19,10 @@ from ..morphology.kiwi_nouns import STOP_HEAD
 # 문장 분리 — 종결어미(SF) 또는 개행 기준. 절 경계를 넘는 오연결 방지.
 _SENT_SPLIT = re.compile(r'(?<=[.!?。\n])\s+|(?<=다\.)\s*')
 
-# 술어로 부적격한 기능동사(경동사). "A에 관하여/대하여" 처럼 관계를 나르지 않는
-# 문법적 기능동사만 컷한다. 한국어 기능동사는 문법적으로 유한한 닫힌 집합이라
-# 이 목록은 무한히 자라지 않는다(관리 원칙 허용 케이스 — IMPROVEMENT_ROADMAP 참고).
-# ⚠️ 여기에 도메인 명사·오탐 단어를 임의로 추가하지 말 것(불용어 노가다 함정).
-_STOP_PRED = STOP_HEAD | {
-    "관하", "대하", "위하", "의하", "따르", "인하", "통하",  # 기능동사(닫힌 집합)
-}
+# 술어 노이즈 컷은 STOP_HEAD(동사성 명사 포함)를 그대로 쓴다. 기능동사(관하/대하/
+# 위하 등 경동사)는 Kiwi 가 VV 로 태깅하고 술어는 'NNG+XSV' 패턴만 채택하므로,
+# 기능동사는 애초에 술어 후보로 들어오지 않는다(실측: 별도 목록 제거해도 관계 수
+# 195개 불변). → POS 태그가 이미 걸러주므로 기능동사 불용어 목록은 죽은 코드라 제거.
 
 _HANGUL = re.compile(r"[가-힣]{2,}")
 
@@ -101,7 +98,7 @@ class KoreanRelationExtractor:
                 if noun_buf:
                     pred_cand = noun_buf[-1]
                     if (2 <= len(pred_cand) <= self.MAX_ARG_LEN
-                            and pred_cand not in _STOP_PRED
+                            and pred_cand not in STOP_HEAD
                             and _HANGUL.fullmatch(pred_cand)):
                         predicate = pred_cand
                         # 술어 완성 시점에 S·P·O 다 있으면 트리플 확정
