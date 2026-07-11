@@ -13,6 +13,10 @@ import re
 from typing import Optional
 
 _ALPHA = re.compile(r"[A-Za-z][A-Za-z0-9\-]*")
+# 토큰 단위 검사용 — 전체가 라틴이어야 버퍼링(fullmatch). 시작만 검사(match)하면
+# "Basel규제" 같은 라틴+한글 꼬리 토큰이 통과해 한글 혼입 클래스명이 방출된다(0711 실측).
+# 마침표 허용은 "U.S." 류 약어 보존용.
+_LATIN_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9\-.]*")
 
 # 클래스로 부적격한 영어 일반명사(불용성 head). 위키/일반문서 노이즈 컷.
 STOP_HEAD_EN = {
@@ -61,10 +65,11 @@ class EnglishNounExtractor:
         buf: list[str] = []
         buf_has_nnp = False
         for w, t in tagged:
-            # 라틴 시작 토큰만 버퍼링 — nltk 는 미지 토큰(한글 등)을 NN 으로 태깅하는
+            # 전체가 라틴인 토큰만 버퍼링 — nltk 는 미지 토큰(한글 등)을 NN 으로 태깅하는
             # 경향이 있어, 혼합문에서 한글이 영어 복합명사에 붙으면("금융위원회는 Basel
-            # Committee") _ALPHA 필터로 통째 소실된다(0711 실측). 비라틴은 경계로 취급.
-            if t.startswith("NN") and _ALPHA.match(w):
+            # Committee") 통째 소실되고, 시작만 검사하면 "Basel규제" 꼬리가 통과한다
+            # (둘 다 0711 실측). 비라틴(부분 포함)은 경계로 취급.
+            if t.startswith("NN") and _LATIN_TOKEN.fullmatch(w):
                 buf.append(w)
                 if t in ("NNP", "NNPS"):
                     buf_has_nnp = True

@@ -101,11 +101,15 @@ class DeterministicOWLGenerator:
             p = clean_korean_name(h.get("parent", ""))
             if p and cu:
                 pc.setdefault(p, []).append(cu)
-        for sibs in pc.values():
+        for sibs_raw in pc.values():
+            # dedup — hierarchy 에 동일 pair 가 중복 유입되면(이어빌드 등) 형제 리스트에
+            # 같은 URI 가 2번 들어가 자기-disjoint(unsatisfiable) 트리플이 생긴다(0711 실측).
+            sibs = list(dict.fromkeys(sibs_raw))
             if 1 < len(sibs) <= self.disjoint_max_siblings:
                 for i, s1 in enumerate(sibs):
                     for s2 in sibs[i + 1:]:
-                        g.add((s1, OWL.disjointWith, s2))
+                        if s1 != s2:
+                            g.add((s1, OWL.disjointWith, s2))
 
         for prop in obj_props:
             name = clean_korean_name(prop.get("name", ""))

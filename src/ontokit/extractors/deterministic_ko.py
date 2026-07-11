@@ -140,7 +140,9 @@ class DeterministicKoreanExtractor:
                     if _LATIN_WORD.search(text):
                         nouns += self.en_nouns.compound_nouns(text)
                 elif lang == "en":
-                    skipped_en_chunks += 1  # 영어 청크인데 영어 도구 없음 — 침묵 방지
+                    # en-지배 청크인데 영어 도구 없음 — 영어 "명사추출" 스킵 집계.
+                    # (한글이 섞여 있으면 한국어 leg 는 동작했을 수 있음 — "통째 스킵" 아님)
+                    skipped_en_chunks += 1
                 for n in nouns:
                     class_chunks.setdefault(n, set()).update(sc)
                 # ② NER 수집: 지배언어 라우팅 유지 — 모델 forward 가 비용 지배적이라
@@ -150,8 +152,11 @@ class DeterministicKoreanExtractor:
                         en_ner_buf.append((doc_name, text, sc))
                 elif self.ner is not None:
                     ko_ner_buf.append((doc_name, text, sc))
-                # ③ 관계(objectProperty) — 조사 기반 SVO. 한국어 청크만(영어는 조사 없음).
-                if self.relations is not None and lang != "en":
+                # ③ 관계(objectProperty) — 조사 기반 SVO. 한글이 있으면 실행(지배언어
+                #   무관) — en-지배 혼합청크의 한국어 문장 관계가 통째 소실되던 것 수정
+                #   (0711 리뷰: 클래스는 이중추출로 살리면서 관계만 버리는 비일관).
+                #   조사(JKS/JKO)는 한글 문장에만 나타나므로 영어 문장엔 원리적으로 무해.
+                if self.relations is not None and _HANGUL.search(text):
                     rels = self.relations.extract(text, source_chunks=sc)
                     if rels:
                         all_relations.extend(rels)
@@ -176,5 +181,17 @@ class DeterministicKoreanExtractor:
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업).
         #   정의문(Hearst) 계층은 실측상 노이즈가 이득을 상쇄해 미채택.
         merged["class_hierarchy"].extend(induce_suffix_hierarchy(set(class_chunks.keys())))
+        # ⚠️pair 단위 dedup — existing 이어빌드 시 기존 hierarchy + 재유도 결과가 겹쳐
+        # 패스마다 동일 pair 가 선형 증식(2→4→6, 0711 리뷰 실측)했고, 중복 pair 는
+        # OWL disjoint 의 형제 리스트에 중복 URI 를 넣어 자기-disjoint(unsatisfiable)
+        # 트리플까지 유발했다. 순서 보존 dedup.
+        seen_pairs: set = set()
+        uniq_hier = []
+        for h in merged["class_hierarchy"]:
+            k = (h.get("parent"), h.get("child"))
+            if k[0] and k[1] and k[0] != k[1] and k not in seen_pairs:
+                seen_pairs.add(k)
+                uniq_hier.append(h)
+        merged["class_hierarchy"] = uniq_hier
 
         return merged, all_entities, all_relations, all_data_props

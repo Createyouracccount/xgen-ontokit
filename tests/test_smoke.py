@@ -1,6 +1,8 @@
 """스모크 — 라이브러리 import·핵심 동작 검증 (코어는 의존성 0, 빌드는 extras[korean])."""
 import asyncio
 
+import pytest
+
 
 def test_import_core():
     """코어 import — 의존성 0."""
@@ -74,7 +76,7 @@ def test_extract_korean():
             domain_words=["여신전문금융업", "신용카드업", "보험업", "생명보험업"],
             enable_relations=False)
     except ImportError:
-        return  # kiwipiepy 없으면 skip
+        pytest.skip("kiwipiepy 없으면 skip")
     docs = {"보험업법": [{"chunk_id": "c1", "chunk_index": 0,
              "chunk_text": "생명보험업과 손해보험업은 보험업의 종류이다. 신용카드업은 여신전문금융업에 속한다."}]}
     concepts, ents, rels, dps = asyncio.run(ext.extract(docs))
@@ -88,7 +90,7 @@ def test_extract_dict_accumulation():
         from ontokit import DeterministicKoreanExtractor
         ext = DeterministicKoreanExtractor(enable_relations=False)
     except ImportError:
-        return
+        pytest.skip("의존성 미설치")
     docs = {"d": [
         {"chunk_id": "c1", "chunk_text": "생명보험업은 중요하다"},
         {"chunk_id": "c2", "chunk_text": "생명보험업을 감독한다"},
@@ -110,7 +112,7 @@ def test_extract_en_skip_stats():
                                            enable_relations=False,
                                            auto_english=False)  # auto-wire 끄고 스킵경로 검증
     except ImportError:
-        return
+        pytest.skip("의존성 미설치")
     docs = {"d": [{"chunk_id": "c1", "chunk_text": "This is an English chunk"}]}
     concepts, *_ = asyncio.run(ext.extract(docs))
     assert concepts.get("skipped_en_chunks") == 1  # 조용히 사라지지 않음
@@ -122,7 +124,7 @@ def test_relation_carryover_tag():
         from ontokit.extractors.relation_ko import KoreanRelationExtractor
         r = KoreanRelationExtractor()
     except ImportError:
-        return
+        pytest.skip("의존성 미설치")
     tris = r.extract("금융위원회는 은행을 감독하고 증권사를 관리한다",
                      source_chunks=["c1"])
     assert len(tris) == 2
@@ -136,7 +138,7 @@ def test_dedup_rename_map():
         from ontokit.dedup.deterministic import DeterministicDedup
         d = DeterministicDedup()
     except ImportError:
-        return
+        pytest.skip("의존성 미설치")
     concepts = {"classes": [{"name": "보험업"}, {"name": "보험업"}],
                 "object_properties": [], "datatype_properties": [],
                 "class_hierarchy": []}
@@ -162,9 +164,9 @@ def test_extract_mixed_language_chunk():
         from ontokit import DeterministicKoreanExtractor
         ext = DeterministicKoreanExtractor(enable_relations=False)  # auto-wire(#4)
     except ImportError:
-        return  # kiwipiepy 미설치
+        pytest.skip("kiwipiepy 미설치")
     if ext.en_nouns is None:
-        return  # nltk 미설치 — 스킵
+        pytest.skip("nltk 미설치 — 스킵")
     docs = {"d": [{"chunk_id": "c1",
                    "chunk_text": "금융위원회는 Basel Committee 권고에 따라 생명보험업을 검토한다"}]}
     concepts, *_ = asyncio.run(ext.extract(docs))
@@ -178,7 +180,7 @@ def test_owl_label_lang():
     try:
         import rdflib  # noqa: F401
     except ImportError:
-        return
+        pytest.skip("의존성 미설치")
     from ontokit.owl.generator import DeterministicOWLGenerator
     gen = DeterministicOWLGenerator()
     concepts = {"classes": [
@@ -194,12 +196,97 @@ def test_auto_english_wiring():
     """auto-wire — nltk 설치 시 en_nouns 자동 배선, auto_english=False 로 끔(v0.6 #4)."""
     import importlib.util
     if importlib.util.find_spec("nltk") is None:
-        return  # nltk 미설치 — 스킵
+        pytest.skip("nltk 미설치 — 스킵")
     try:
         from ontokit import DeterministicKoreanExtractor
         ext = DeterministicKoreanExtractor(enable_relations=False)
     except ImportError:
-        return  # kiwipiepy 미설치
+        pytest.skip("kiwipiepy 미설치")
     assert ext.en_nouns is not None
     ext_off = DeterministicKoreanExtractor(enable_relations=False, auto_english=False)
     assert ext_off.en_nouns is None
+
+
+def test_suffix_case_collision_deterministic():
+    """대소문자 충돌 결정성 — 사전순 최소 표면형 승자 + 정렬 방출(v0.6.1).
+
+    v0.6.0 결함: set 순회(해시시드 의존)라 실행마다 다른 표면형이 parent 로 살아남음."""
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    names = {"Insurance Business", "insurance business",
+             "Life insurance business", "General Insurance Business"}
+    pairs = [(h["parent"], h["child"]) for h in induce_suffix_hierarchy(names)]
+    assert pairs and all(p == "Insurance Business" for p, _ in pairs)  # 사전순 최소 승자
+    assert pairs == sorted(pairs)  # 방출 순서도 결정적
+
+
+def test_hierarchy_no_dup_on_incremental_rebuild():
+    """이어빌드 hierarchy 중복 증식 방지 — 패스마다 2→4→6 선형증식하던 결함(v0.6.1).
+
+    중복 pair 는 OWL disjoint 형제 리스트를 오염시켜 자기-disjoint(unsatisfiable)까지 유발."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(enable_relations=False, auto_english=False)
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    existing = {
+        "classes": [{"name": n, "description": "", "parent": None, "source_chunks": ["c1"]}
+                    for n in ("생명보험업", "손해보험업", "보험업")],
+        "object_properties": [], "datatype_properties": [],
+        "class_hierarchy": [{"parent": "보험업", "child": "생명보험업"},
+                            {"parent": "보험업", "child": "손해보험업"}],
+    }
+    docs = {"e": [{"chunk_id": "c9", "chunk_text": "무관한 화학 물질 문서 내용."}]}
+    m, *_ = asyncio.run(ext.extract(docs, existing=existing))
+    m2, *_ = asyncio.run(ext.extract(docs, existing=m))
+    pairs2 = [(h["parent"], h["child"]) for h in m2["class_hierarchy"]]
+    assert len(pairs2) == len(set(pairs2)) == 2  # 2패스 후에도 중복 0
+
+
+def test_owl_no_self_disjoint():
+    """OWL 자기-disjoint 방어 — 중복 pair 유입에도 self-disjointWith 미생성(v0.6.1)."""
+    try:
+        import rdflib  # noqa: F401
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    from ontokit.owl.generator import DeterministicOWLGenerator
+    concepts = {"classes": [{"name": n, "description": ""} for n in ("보험업", "생명보험업", "손해보험업")],
+                "object_properties": [], "datatype_properties": [],
+                "class_hierarchy": [{"parent": "보험업", "child": "생명보험업"},
+                                    {"parent": "보험업", "child": "손해보험업"},
+                                    {"parent": "보험업", "child": "생명보험업"}]}  # 중복 주입
+    ttl = DeterministicOWLGenerator().generate(concepts)["ttl_content"]
+    import re as _re
+    for m in _re.finditer(r"(:\S+)\s+owl:disjointWith\s+(:\S+)", ttl):
+        assert m.group(1) != m.group(2)  # 자기-disjoint 없음
+
+
+def test_suffix_no_latin_char_suffix():
+    """라틴 단일토큰 문자접미 오탐 차단 — placement⊂cement 류(v0.6.1)."""
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    pairs = {(h["parent"], h["child"]) for h in induce_suffix_hierarchy(
+        {"cement", "placement", "replacement", "insurance", "reinsurance", "coinsurance"})}
+    assert not pairs  # 순수 라틴 단일토큰끼리는 문자접미 계층 생성 금지
+
+
+def test_relations_survive_en_dominant_chunk():
+    """en-지배 혼합청크의 한국어 문장 관계 보존 — lang 게이트→한글존재 게이트(v0.6.1)."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(enable_relations=True, auto_english=False)
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    en_pad = ("The Financial Services Commission supervises banks under the applicable "
+              "banking statutes and issues binding guidance for licensed institutions.")
+    docs = {"d": [{"chunk_id": "c1", "chunk_text": en_pad + " 금융위원회는 은행을 감독한다."}]}
+    _, _, rels, _ = asyncio.run(ext.extract(docs))
+    assert ("금융위원회", "감독", "은행") in {(r["subject"], r["predicate"], r["object"]) for r in rels}
+
+
+def test_en_nouns_rejects_hangul_tail():
+    """en_nouns 토큰 fullmatch — 'Basel규제' 라틴+한글 꼬리 토큰 배출 금지(v0.6.1)."""
+    import importlib.util
+    if importlib.util.find_spec("nltk") is None:
+        pytest.skip("의존성 미설치")
+    from ontokit.morphology.en_nouns import EnglishNounExtractor
+    res = EnglishNounExtractor().compound_nouns("The Basel규제 framework and Basel규제 rules")
+    assert not any("규제" in n for n in res)  # 한글 혼입 클래스명 없음
