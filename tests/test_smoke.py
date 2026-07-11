@@ -290,3 +290,66 @@ def test_en_nouns_rejects_hangul_tail():
     from ontokit.morphology.en_nouns import EnglishNounExtractor
     res = EnglishNounExtractor().compound_nouns("The Basel규제 framework and Basel규제 rules")
     assert not any("규제" in n for n in res)  # 한글 혼입 클래스명 없음
+
+
+def test_relation_prohibition():
+    """금지 규범 — "~하여서는 아니 된다" → 술어+' 금지' (v0.7 ⑤)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    tris = r.extract("보험회사는 기존보험계약을 부당하게 소멸시켜서는 아니 된다",
+                     source_chunks=["c"])
+    assert any(t["predicate"] == "소멸 금지" and t["object"] == "기존보험계약" for t in tris)
+
+
+def test_relation_discretion_not_prohibition():
+    """재량 규정 — "~하지 아니할 수 있다"는 금지 아님 (v0.7 ⑤ 예외)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    tris = r.extract("보험회사는 주권을 발행하지 아니할 수 있다", source_chunks=["c"])
+    assert not any("금지" in t["predicate"] for t in tris)
+
+
+def test_relation_dative_object():
+    """여격 목적어 폴백 — "금융위원회에 등록" (v0.7 ④)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    tris = r.extract("보험중개사는 금융위원회에 등록하여야 한다", source_chunks=["c"])
+    assert ("보험중개사", "등록", "금융위원회") in {
+        (t["subject"], t["predicate"], t["object"]) for t in tris}
+
+
+def test_relation_adnominal_subject_restore():
+    """관형절 주어 복원 — "금융위원회가 지정하는 기관에"의 금융위원회가
+    바깥 주어를 덮지 않음 (v0.7 ⑦)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    tris = r.extract("보험중개사는 금융위원회가 지정하는 기관에 영업보증금을 예탁하여야 한다",
+                     source_chunks=["c"])
+    subs = {t["subject"] for t in tris if t["predicate"] == "예탁"}
+    assert subs == {"보험중개사"}  # 금융위원회(내포절 주어) 아님
+
+
+def test_relation_vv_predicate_and_xsn():
+    """VV 술어(따름) + XSN 접미사 결합(선임계리사 파손 방지) (v0.7 ⑥, 0711 파손수정)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    tris = r.extract("요청받은 중앙행정기관의 장은 요청에 따라야 한다", source_chunks=["c"])
+    assert any(t["predicate"] == "따름" for t in tris)   # VV 명사형화
+    tris2 = r.extract("보험회사는 다른 보험회사의 선임계리사를 해당 보험회사의 선임계리사로 선임할 수 없다",
+                      source_chunks=["c"])
+    assert all(t["object"] != "리사" and t["subject"] != "리사" for t in tris2)  # 표면 파손 없음
