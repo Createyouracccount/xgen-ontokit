@@ -107,7 +107,8 @@ def test_extract_en_skip_stats():
     try:
         from ontokit import DeterministicKoreanExtractor
         ext = DeterministicKoreanExtractor(en_nouns=None, en_ner=None,
-                                           enable_relations=False)
+                                           enable_relations=False,
+                                           auto_english=False)  # auto-wire 끄고 스킵경로 검증
     except ImportError:
         return
     docs = {"d": [{"chunk_id": "c1", "chunk_text": "This is an English chunk"}]}
@@ -141,3 +142,64 @@ def test_dedup_rename_map():
                 "class_hierarchy": []}
     rename = d.compute_rename_map(concepts, {})
     assert isinstance(rename, dict)  # 실패 없이 맵 반환
+
+
+def test_suffix_hierarchy_english():
+    """영어 계층 — 공백형은 단어 접미·대소문자 무시, 단어경계 보호(v0.6 #1). 의존성 0."""
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    names = {"Life insurance business", "General Insurance Business",
+             "insurance business", "Reinsurance business"}
+    pairs = {(h["parent"], h["child"]) for h in induce_suffix_hierarchy(names)}
+    assert ("insurance business", "Life insurance business") in pairs
+    assert ("insurance business", "General Insurance Business") in pairs  # 대소문자 무시
+    # 단어경계 보호 — reinsurance 는 insurance 의 문자접미지만 단어접미 아님
+    assert ("insurance business", "Reinsurance business") not in pairs
+
+
+def test_extract_mixed_language_chunk():
+    """혼합 청크 이중 추출 — 한국어 우세 청크의 영어 용어 보존(v0.6 #2)."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(enable_relations=False)  # auto-wire(#4)
+    except ImportError:
+        return  # kiwipiepy 미설치
+    if ext.en_nouns is None:
+        return  # nltk 미설치 — 스킵
+    docs = {"d": [{"chunk_id": "c1",
+                   "chunk_text": "금융위원회는 Basel Committee 권고에 따라 생명보험업을 검토한다"}]}
+    concepts, *_ = asyncio.run(ext.extract(docs))
+    names = {c["name"] for c in concepts["classes"]}
+    assert "생명보험업" in names                 # 한국어 유지
+    assert any("Basel" in n for n in names)     # 영어 용어 생존 (v0.5=통째 소실)
+
+
+def test_owl_label_lang():
+    """OWL 라벨 언어태그 — 한글=@ko, 영어=@en 자동판정(v0.6 #3). extras[owl]."""
+    try:
+        import rdflib  # noqa: F401
+    except ImportError:
+        return
+    from ontokit.owl.generator import DeterministicOWLGenerator
+    gen = DeterministicOWLGenerator()
+    concepts = {"classes": [
+        {"name": "생명보험업", "description": ""},
+        {"name": "Life insurance business", "description": ""}],
+        "object_properties": [], "datatype_properties": [], "class_hierarchy": []}
+    ttl = gen.generate(concepts)["ttl_content"]
+    assert '"생명보험업"@ko' in ttl
+    assert '"Life insurance business"@en' in ttl
+
+
+def test_auto_english_wiring():
+    """auto-wire — nltk 설치 시 en_nouns 자동 배선, auto_english=False 로 끔(v0.6 #4)."""
+    import importlib.util
+    if importlib.util.find_spec("nltk") is None:
+        return  # nltk 미설치 — 스킵
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(enable_relations=False)
+    except ImportError:
+        return  # kiwipiepy 미설치
+    assert ext.en_nouns is not None
+    ext_off = DeterministicKoreanExtractor(enable_relations=False, auto_english=False)
+    assert ext_off.en_nouns is None

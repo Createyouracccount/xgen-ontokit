@@ -61,7 +61,10 @@ class EnglishNounExtractor:
         buf: list[str] = []
         buf_has_nnp = False
         for w, t in tagged:
-            if t.startswith("NN"):
+            # 라틴 시작 토큰만 버퍼링 — nltk 는 미지 토큰(한글 등)을 NN 으로 태깅하는
+            # 경향이 있어, 혼합문에서 한글이 영어 복합명사에 붙으면("금융위원회는 Basel
+            # Committee") _ALPHA 필터로 통째 소실된다(0711 실측). 비라틴은 경계로 취급.
+            if t.startswith("NN") and _ALPHA.match(w):
                 buf.append(w)
                 if t in ("NNP", "NNPS"):
                     buf_has_nnp = True

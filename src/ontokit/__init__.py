@@ -24,7 +24,7 @@ from .morphology.en_nouns import EnglishNounExtractor
 from .ner.english import EnglishNER
 from .utils.lang_detect import detect_lang
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __all__ = [
     "Extractor", "GraphStore", "VectorStore", "LLM",
     "DeterministicKoreanExtractor", "merge_concepts",

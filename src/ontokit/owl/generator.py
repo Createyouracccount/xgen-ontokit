@@ -15,6 +15,16 @@ XSD_TYPE_MAP = {
     "string": "string", "decimal": "decimal", "integer": "integer",
 }
 
+_HANGUL_RE = re.compile(r"[가-힣]")
+
+
+def label_lang(text: str) -> str:
+    """라벨 언어태그 자동판정 — 한글 포함이면 ko, 아니면 en.
+
+    v0.5 까지 전 라벨 lang="ko" 하드코딩이라 영어 클래스도 "…"@ko 로 출력 —
+    RDF 의미론 오류 + FILTER(lang(?l)='en') 질의 전멸(0710 실측). 이중언어 필수."""
+    return "ko" if _HANGUL_RE.search(text or "") else "en"
+
 
 def clean_korean_name(raw: str) -> str:
     if not raw:
@@ -56,7 +66,7 @@ class DeterministicOWLGenerator:
 
         onto = URIRef(self.NAMESPACE_URI.rstrip("#"))
         g.add((onto, RDF.type, OWL.Ontology))
-        g.add((onto, RDFS.label, Literal(domain_name, lang="ko")))
+        g.add((onto, RDFS.label, Literal(domain_name, lang=label_lang(domain_name))))
 
         class_uris = {}
         for cls in classes:
@@ -66,9 +76,9 @@ class DeterministicOWLGenerator:
             uri = ns[self._uri(name)]
             class_uris[name] = uri
             g.add((uri, RDF.type, OWL.Class))
-            g.add((uri, RDFS.label, Literal(name, lang="ko")))
+            g.add((uri, RDFS.label, Literal(name, lang=label_lang(name))))
             if cls.get("description"):
-                g.add((uri, RDFS.comment, Literal(cls["description"], lang="ko")))
+                g.add((uri, RDFS.comment, Literal(cls["description"], lang=label_lang(cls["description"]))))
 
         for h in hierarchy:
             p = class_uris.get(clean_korean_name(h.get("parent", "")))
@@ -103,7 +113,7 @@ class DeterministicOWLGenerator:
                 continue
             uri = ns[self._uri(name)]
             g.add((uri, RDF.type, OWL.ObjectProperty))
-            g.add((uri, RDFS.label, Literal(name, lang="ko")))
+            g.add((uri, RDFS.label, Literal(name, lang=label_lang(name))))
             d = clean_korean_name(prop.get("domain", "")); r = clean_korean_name(prop.get("range", ""))
             if d in class_uris:
                 g.add((uri, RDFS.domain, class_uris[d]))
@@ -116,7 +126,7 @@ class DeterministicOWLGenerator:
                 continue
             uri = ns[self._uri(name)]
             g.add((uri, RDF.type, OWL.DatatypeProperty))
-            g.add((uri, RDFS.label, Literal(name, lang="ko")))
+            g.add((uri, RDFS.label, Literal(name, lang=label_lang(name))))
             d = clean_korean_name(prop.get("domain", ""))
             if d in class_uris:
                 g.add((uri, RDFS.domain, class_uris[d]))

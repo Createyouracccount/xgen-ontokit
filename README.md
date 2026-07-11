@@ -1,6 +1,19 @@
 # xgen-ontokit
 
-XGEN 온톨로지 **빌드·검색 개선 키트**. 우리가 수정·주입하는 온톨로지 개선을 하나로 말아 XGEN에 주입하는 라이브러리. omnifuse(검색 라이브러리)와 상보 — 이쪽은 **빌드(LLM-free 한국어 추출) + 검색 개선**을 함께 담는다.
+XGEN 온톨로지 **빌드·검색 개선 키트**. 우리가 수정·주입하는 온톨로지 개선을 하나로 말아 XGEN에 주입하는 라이브러리. omnifuse(검색 라이브러리)와 상보 — 이쪽은 **빌드(LLM-free 한국어·영어 추출) + 검색 개선**을 함께 담는다.
+
+## 언어 지원 매트릭스 (v0.6, 정직하게)
+
+| 축 | 한국어 | 영어 | 혼합 청크 |
+|---|---|---|---|
+| 클래스(복합명사) | ✅ Kiwi | ✅ nltk POS (extras[english], **auto-wire**) | ✅ 이중 추출(소수언어 용어 보존) |
+| 계층(subClassOf) | ✅ 문자 접미공유 | ✅ 단어 접미공유(대소문자 무시) | ✅ |
+| 엔티티(NER) | ✅ KoELECTRA(주입) | ✅ dslim BERT MIT(주입) | ⚠️ 지배언어만(비용) |
+| **관계(SVO)** | ✅ 조사 기반 | ❌ **미지원** — 측정 인프라 확보 후 별도 트랙 | 한국어만 |
+| OWL 라벨 | `@ko` | `@en` (자동판정) | 혼재 출력 |
+
+⚠️ 품질 검증 범위: 한국어=finreg 489 실측, 영어=구조 테스트만(코퍼스 실측 미완).
+관계추출은 규칙 F1 0.233 vs LLM 0.654(0710 pooling 실측) — 정형텍스트 정밀도용, recall 한계 명시.
 
 ## 철학
 - **코어 의존성 0** — 백엔드·모델(kiwipiepy/transformers/httpx)은 전부 extras.
@@ -17,7 +30,7 @@ pip install "xgen-ontokit[all]"          # 전부
 pip install "git+https://github.com/<org>/xgen-ontokit.git"
 ```
 
-## 빌드 — LLM-free 한국어 추출
+## 빌드 — LLM-free 한국어·영어 추출
 ```python
 from ontokit import DeterministicKoreanExtractor
 
@@ -51,11 +64,11 @@ from ontokit.search import class_instances_triple, blend_score
 ```
 src/ontokit/
 ├── protocols.py          # 주입 인터페이스 (Extractor/GraphStore/VectorStore/LLM)
-├── extractors/           # deterministic_ko(핵심) + base(merge_concepts)
-├── morphology/           # kiwi_nouns (복합명사)
-├── hierarchy/            # suffix_share(접미공유·주엔진), hearst_ko(정의문·확장)
-├── ner/                  # koelectra
-└── search/               # improvements (subClassOf*, floor guard)
+├── extractors/           # deterministic_ko(핵심, 한·영 이중추출) + base(merge_concepts)
+├── morphology/           # kiwi_nouns(한국어) + en_nouns(영어 nltk POS)
+├── hierarchy/            # suffix_share(접미공유·주엔진, ko=문자/en=단어), hearst_ko(확장)
+├── ner/                  # koelectra(ko) + english(dslim BERT MIT)
+└── search/               # improvements (subClassOf*, floor guard) — ⚠️XGEN 전용
 ```
 
 ## 근거
@@ -67,7 +80,7 @@ src/ontokit/
 
 ```bash
 pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git"
-# 버전 고정(권장): ...xgen-ontokit.git@v0.5.0
+# 버전 고정(권장): ...xgen-ontokit.git@v0.6.0
 ```
 
 XGEN `pyproject.toml` dependencies 또는 requirements에 위 URL 추가.

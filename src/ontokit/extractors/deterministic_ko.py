@@ -1,35 +1,49 @@
-"""한국어 LLM-free 온톨로지 추출기 — Extractor 프로토콜 구현.
+"""한국어·영어 LLM-free 온톨로지 추출기 — Extractor 프로토콜 구현.
 
-Kiwi 복합명사(클래스) + KoELECTRA NER(엔티티) + 접미공유(subClassOf 계층). LLM 0회.
+Kiwi 복합명사(ko)+nltk 명사구(en) 클래스 + 언어별 NER 엔티티 + 접미공유 subClassOf
+계층(ko=문자, en=단어 단위). 관계(조사 SVO)는 한국어만. LLM 0회.
 finreg 489 실측: 4.5초/$0, 클래스 3156·subClassOf 1710. 검색 A/B에서 gpt-4o와 동일(0.947).
 
 XGEN pipeline은 이것을 gpt-4o DocumentOntologyExtractor 대신 주입 가능(같은 4-tuple 계약).
 """
 from __future__ import annotations
 import asyncio
+import re
 from typing import Optional
 
 from ..morphology.kiwi_nouns import KiwiNounExtractor
 from ..hierarchy.suffix_share import induce_suffix_hierarchy
 from ..utils.lang_detect import detect_lang
 
+_HANGUL = re.compile(r"[가-힣]")
+_LATIN_WORD = re.compile(r"[A-Za-z]{2,}")  # 라틴 2자+ 연속 (단독 기호·항번호 제외)
+
 
 class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
                  en_nouns=None, en_ner=None, relation_extractor=None,
-                 enable_relations: bool = True):
+                 enable_relations: bool = True, auto_english: bool = True):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
-        domain_words: 사용자사전 도메인 용어.
-        en_nouns: EnglishNounExtractor(None이면 영어 명사추출 생략, extras[english]).
+        domain_words: 사용자사전 도메인 용어(한국어 Kiwi 사용자사전 + 영어 단일명사 허용목록).
+        en_nouns: EnglishNounExtractor(None이면 auto_english 에 따라 자동 배선, extras[english]).
         en_ner: EnglishNER(None이면 영어 엔티티 추출 생략, extras[ner]).
+        auto_english: True(기본)면 nltk 설치 시 en_nouns 자동 생성 — 영어 클래스가
+          별도 주입 없이 나온다. en_ner 는 torch 모델 로드가 무거워 자동화하지 않음(명시 주입만).
 
-        혼합 코퍼스(한국어+영어)에서 청크 언어를 감지해 언어별 도구로 라우팅.
-        영어 도구 미주입 시 영어 청크의 클래스/인스턴스는 스킵(하위호환 —
-        기존 한국어 전용 동작 유지)."""
+        혼합 코퍼스(한국어+영어): 명사(클래스)는 한·영 추출기를 **둘 다** 실행해
+        혼합 청크의 소수언어 용어("Basel III 규제"의 Basel)를 보존한다(v0.6, 자연 직교 —
+        Kiwi 는 라틴 무시, en_nouns 는 한글 무시). NER 는 비용(모델 forward) 때문에
+        지배언어 라우팅 유지. 관계는 조사 기반이라 한국어 청크만."""
         self.nouns = KiwiNounExtractor(kiwi, domain_words)
         self.ner = ner
         self.en_nouns = en_nouns
+        if self.en_nouns is None and auto_english:
+            # extras[english](nltk) 설치돼 있으면 영어 명사추출 자동 배선(#4 auto-wire).
+            import importlib.util
+            if importlib.util.find_spec("nltk") is not None:
+                from ..morphology.en_nouns import EnglishNounExtractor
+                self.en_nouns = EnglishNounExtractor(domain_words)
         self.en_ner = en_ner
         # 한국어 관계(objectProperty) 추출 — 조사 기반 SVO. Kiwi 인스턴스 공유.
         self.relations = None
@@ -114,22 +128,28 @@ class DeterministicKoreanExtractor:
                 if not text.strip():
                     continue
                 sc = [cid] if cid else []
-                # 청크 언어 감지 → 언어별 도구 라우팅(형태소·NER)
                 lang = detect_lang(text)
-                if lang == "en":
-                    if self.en_nouns is None:
-                        skipped_en_chunks += 1
-                        continue  # 영어 도구 없음 — Kiwi 로 폴백해봐야 빈 결과, 명시적 스킵
-                    nouns = self.en_nouns.compound_nouns(text)
-                    if self.en_ner is not None:
-                        en_ner_buf.append((doc_name, text, sc))
-                else:
-                    nouns = self.nouns.compound_nouns(text)
-                    if self.ner is not None:
-                        ko_ner_buf.append((doc_name, text, sc))
-                # ① 복합명사 → 클래스 (dict 누적, O(1))
+                # ① 명사→클래스: 한·영 이중 추출 (v0.6) — 혼합 청크의 소수언어 용어 보존.
+                #   Kiwi 는 라틴 무시, en_nouns 는 한글 무시라 자연 직교(간섭·중복 없음).
+                #   v0.5 까지는 ko/en 택1 라우팅이라 "Basel III 규제" 류 혼합청크에서
+                #   소수언어 용어가 통째 소실됐다(0710 실측).
+                nouns: list[str] = []
+                if _HANGUL.search(text):
+                    nouns += self.nouns.compound_nouns(text)
+                if self.en_nouns is not None:
+                    if _LATIN_WORD.search(text):
+                        nouns += self.en_nouns.compound_nouns(text)
+                elif lang == "en":
+                    skipped_en_chunks += 1  # 영어 청크인데 영어 도구 없음 — 침묵 방지
                 for n in nouns:
                     class_chunks.setdefault(n, set()).update(sc)
+                # ② NER 수집: 지배언어 라우팅 유지 — 모델 forward 가 비용 지배적이라
+                #   이중 실행하지 않음(혼합청크의 소수언어 엔티티는 커버 밖, README 명시).
+                if lang == "en":
+                    if self.en_ner is not None:
+                        en_ner_buf.append((doc_name, text, sc))
+                elif self.ner is not None:
+                    ko_ner_buf.append((doc_name, text, sc))
                 # ③ 관계(objectProperty) — 조사 기반 SVO. 한국어 청크만(영어는 조사 없음).
                 if self.relations is not None and lang != "en":
                     rels = self.relations.extract(text, source_chunks=sc)
