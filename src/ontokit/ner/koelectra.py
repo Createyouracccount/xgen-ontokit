@@ -10,15 +10,28 @@
 금융 도메인은 KF-DeBERTa(MIT, 금융 FN-NER 91.80)가 더 강함 — model 인자로 교체 가능.
 """
 from __future__ import annotations
+import logging
+import threading
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # TTA 15 분류(모두의말뭉치) 코드 → 온톨로지 클래스명. 모델 라벨셋 = 닫힌 집합이라
 # 수동 목록 금지 원칙(무한증식) 대상 아님. 미등록 코드는 원문 코드 유지(안전).
+# CV 는 TTA 표준명이 '문명(CIVILIZATION)'이지만 실제 커버가 법률·직위·음식·스포츠
+# 등 제도·문화 전반(실측: 보험업법·대통령·김치·태권도가 전부 CV)이라, 온톨로지
+# 클래스명으로 '문명'은 오독을 부름 → 커버 범위를 그대로 읽는 '문화·제도'로 표기.
 TTA_LABEL_KO = {
     "PS": "인물", "FD": "분야", "TR": "이론", "AF": "인공물", "OG": "기관",
-    "LC": "지역", "CV": "문명", "DT": "날짜", "TI": "시간", "QT": "수량",
+    "LC": "지역", "CV": "문화·제도", "DT": "날짜", "TI": "시간", "QT": "수량",
     "EV": "사건", "AM": "동물", "PT": "식물", "MT": "물질", "TM": "용어",
 }
+
+# NER 입력 글자수 상한. 모델 한계는 512 "토큰"이고 transformers 가 자동 truncate
+# 하므로 crash 방어용이 아니라 연산량 상한이다. 한국어 ~2.2자/토큰이라 1200자
+# ≈ 512토큰 근방 — 이전 512"자" 절단은 과잉 보수로 청크 후반부 엔티티를 통째
+# 버렸다(0711 적대리뷰 MED). 1200자 초과분은 여전히 커버 밖(정직한 한계).
+MAX_NER_CHARS = 1200
 
 
 class KoElectraNER:
@@ -29,49 +42,75 @@ class KoElectraNER:
     def __init__(self, model: Optional[str] = None, pipeline=None):
         self._pipe = pipeline
         self._model = model or self.DEFAULT_MODEL
+        # 동시 빌드 2개가 같은 인스턴스를 서로 다른 to_thread 워커에서 쓸 때
+        # HF fast tokenizer(Rust)의 "Already borrowed" 충돌·모델 이중 로드를 방지
+        # (0711 적대리뷰 HIGH — factory 가 단일 인스턴스를 전 빌드에 공유).
+        self._lock = threading.Lock()
 
     def _ensure(self):
-        if self._pipe is None:
-            from transformers import pipeline as hf_pipeline  # lazy — extras[ner]
-            self._pipe = hf_pipeline("ner", model=self._model,
-                                     aggregation_strategy="simple")
+        with self._lock:
+            if self._pipe is None:
+                from transformers import pipeline as hf_pipeline  # lazy — extras[ner]
+                self._pipe = hf_pipeline("ner", model=self._model,
+                                         aggregation_strategy="simple")
 
-    def entities(self, text: str, *, source_chunks: list[str], max_len: int = 512) -> list[dict]:
-        self._ensure()
+    def _to_dicts(self, ents, source_chunks: list[str]) -> list[dict]:
+        """HF 파이프라인 원시 출력 → 엔티티 dict (2자 미만 파편 컷 + 한글 클래스명)."""
         out = []
-        try:
-            for e in self._pipe(text[:max_len]):
-                w = e.get("word", "").replace("##", "").strip()
-                if len(w) >= 2:
-                    g = e.get("entity_group", "ENTITY")
-                    out.append({"entity": w, "class": TTA_LABEL_KO.get(g, g),
-                                "type": "INSTANCE", "source_chunks": source_chunks})
-        except Exception:
-            pass
+        for e in ents or []:
+            w = (e.get("word", "") or "").replace("##", "").strip()
+            if len(w) >= 2:
+                g = e.get("entity_group", "ENTITY")
+                out.append({"entity": w, "class": TTA_LABEL_KO.get(g, g),
+                            "type": "INSTANCE", "source_chunks": source_chunks})
         return out
 
+    def entities(self, text: str, *, source_chunks: list[str],
+                 max_len: int = MAX_NER_CHARS) -> list[dict]:
+        self._ensure()
+        try:
+            with self._lock:
+                ents = self._pipe(text[:max_len])
+        except Exception:
+            logger.warning("NER 단건 추론 실패 — 해당 청크 엔티티 생략", exc_info=True)
+            return []
+        return self._to_dicts(ents, source_chunks)
+
     def entities_batch(self, texts: list[str], *, source_chunks_list: list[list[str]],
-                       max_len: int = 512, batch_size: int = 32) -> list[list[dict]]:
-        """여러 청크를 배치 forward 로 추론 — CPU 실측 891ms→430ms/청크(2배).
+                       max_len: int = MAX_NER_CHARS, batch_size: int = 32) -> list[list[dict]]:
+        """여러 청크를 배치 forward 로 추론 — CPU 실측 단건 891ms→배치 430ms/청크.
 
         청크별 entities() 반복은 forward 를 청크 수만큼 개별 실행해 대용량(2만 청크)
-        에서 완주 불가(0710 mixed20k 실측: 단건 297분 vs 배치32 143분 추정).
+        에서 완주 불가(0710 mixed20k 실측: 단건 297분 vs 배치 143분 추정).
         반환: texts 와 같은 순서의 리스트-of-리스트(i번째 = texts[i]의 엔티티).
-        배치 전체 실패 시 빈 결과(단건 entities 와 동일한 실패 격리)."""
+
+        실패 격리 = 서브배치 단위: batch_size 조각으로 나눠 추론하고, 조각이
+        실패하면 그 조각만 단건 폴백으로 재시도한다. 이전 구현은 그룹 전체(수백
+        청크)를 단일 try 에 넣어 텍스트 1개의 예외가 그룹 전량을 무성 소실시켰다
+        (0711 적대리뷰 HIGH — "문서 500 조용한 누락"과 동형 함정). 폴백의 단건
+        실패는 entities() 가 로그 남기고 빈 리스트 반환(청크 단위 격리 복원)."""
         self._ensure()
         results: list[list[dict]] = [[] for _ in texts]
         if not texts:
             return results
-        try:
-            batched = self._pipe([t[:max_len] for t in texts], batch_size=batch_size)
-        except Exception:
-            return results
-        for i, ents in enumerate(batched):
-            sc = source_chunks_list[i]
-            for e in ents or []:
-                w = (e.get("word", "") or "").replace("##", "").strip()
-                if len(w) >= 2:
-                    g = e.get("entity_group", "ENTITY")
-                    results[i].append({"entity": w, "class": TTA_LABEL_KO.get(g, g),
-                                       "type": "INSTANCE", "source_chunks": sc})
+        for start in range(0, len(texts), batch_size):
+            chunk = texts[start:start + batch_size]
+            try:
+                with self._lock:
+                    batched = self._pipe([t[:max_len] for t in chunk],
+                                         batch_size=batch_size)
+                if len(batched) != len(chunk):
+                    raise RuntimeError(
+                        f"배치 출력 {len(batched)} != 입력 {len(chunk)}")
+                for j, ents in enumerate(batched):
+                    results[start + j] = self._to_dicts(
+                        ents, source_chunks_list[start + j])
+            except Exception:
+                logger.warning(
+                    "NER 배치 실패(%d~%d) — 단건 폴백", start, start + len(chunk),
+                    exc_info=True)
+                for j, t in enumerate(chunk):
+                    results[start + j] = self.entities(
+                        t, source_chunks=source_chunks_list[start + j],
+                        max_len=max_len)
         return results

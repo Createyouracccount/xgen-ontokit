@@ -9,6 +9,7 @@ XGEN pipeline은 이것을 gpt-4o DocumentOntologyExtractor 대신 주입 가능
 from __future__ import annotations
 import asyncio
 import re
+import threading
 from typing import Optional
 
 from ..morphology.kiwi_nouns import KiwiNounExtractor
@@ -53,6 +54,10 @@ class DeterministicKoreanExtractor:
             else:
                 from .relation_ko import KoreanRelationExtractor
                 self.relations = KoreanRelationExtractor(kiwi=self.nouns.kiwi)
+        # 동시 빌드 2개가 같은 extractor 인스턴스(factory 공유)를 서로 다른
+        # to_thread 워커에서 돌릴 때 Kiwi 동시 호출을 직렬화(스레드 안전성 미보장
+        # 방어, 0711 적대리뷰 HIGH). NER 는 자체 락 보유 — 이 락은 형태소·관계 커버.
+        self._lock = threading.Lock()
 
     @staticmethod
     def _run_ner_batched(ner, buf: list[tuple[str, str, list]],
@@ -68,6 +73,11 @@ class DeterministicKoreanExtractor:
         batch_fn = getattr(ner, "entities_batch", None)
         if batch_fn is not None:
             results = batch_fn(texts, source_chunks_list=scs)
+            # 커스텀 주입 NER 의 배치 구현이 길이를 어길 수 있음 — zip 이 꼬리를
+            # 무성 절단하지 않도록 검증 후 단건 폴백(0711 리뷰 PLAUSIBLE 방어).
+            if len(results) != len(buf):
+                results = [ner.entities(t, source_chunks=sc)
+                           for t, sc in zip(texts, scs)]
         else:
             results = [ner.entities(t, source_chunks=sc) for t, sc in zip(texts, scs)]
         for (doc_name, _, _), ents in zip(buf, results):
@@ -92,6 +102,18 @@ class DeterministicKoreanExtractor:
             self._extract_sync, documents, domain=domain, existing=existing)
 
     def _extract_sync(
+        self,
+        documents: dict[str, list[dict]],
+        *,
+        domain: str = "",
+        existing: Optional[dict] = None,
+    ) -> tuple[dict, dict, list, list]:
+        # 인스턴스 락 — 동시 빌드가 공유 extractor 를 쓸 때 전체 추출을 직렬화.
+        # (병렬성 손실보다 Kiwi/tokenizer 동시 호출 미정의 동작이 훨씬 위험)
+        with self._lock:
+            return self._extract_impl(documents, domain=domain, existing=existing)
+
+    def _extract_impl(
         self,
         documents: dict[str, list[dict]],
         *,

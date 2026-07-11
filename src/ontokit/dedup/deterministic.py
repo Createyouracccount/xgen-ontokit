@@ -8,6 +8,7 @@ in-memory concepts 4-tuple 변환만 — 인프라(Fuseki/DB) 결합 0.
 """
 from __future__ import annotations
 import re
+import threading
 
 _CLEAN = re.compile(r'[\s_\-·•/\\()（）「」『』【】\[\]]+')
 _NOISE_EN = re.compile(
@@ -23,6 +24,9 @@ class DeterministicDedup:
             from kiwipiepy import Kiwi  # extras[korean]
             kiwi = Kiwi()
         self._kiwi = kiwi
+        # 동시 빌드 2개가 같은 dedup 인스턴스를 서로 다른 to_thread 워커에서 쓸 때
+        # Kiwi.analyze 동시 호출을 직렬화(스레드 안전성 미보장 방어). 0711 적대리뷰 지적.
+        self._lock = threading.Lock()
 
     def _noun_key(self, name: str, *, strip_en_noise: bool = False) -> str:
         cleaned = _CLEAN.sub('', (name or '').strip())
@@ -58,22 +62,33 @@ class DeterministicDedup:
 
     def compute_rename_map(self, concepts: dict, ner_entities: dict) -> dict[str, str]:
         """클래스·인스턴스·속성 결정적 rename map. concepts/entities 는 읽기만."""
-        rename: dict[str, str] = {}
-        # 클래스
-        cls_names = [c.get("name", "") for c in concepts.get("classes", []) if c.get("name")]
-        rename.update(self._rename_by_key(cls_names))
-        # 인스턴스
-        inst_names = [e.get("entity", "") for ents in ner_entities.values() for e in ents]
-        rename.update(self._rename_by_key(inst_names))
-        # ObjectProperty (영문 노이즈 제거)
-        prop_names = [p.get("name", "") for p in concepts.get("object_properties", []) if p.get("name")]
-        rename.update(self._rename_by_key(prop_names, strip_en_noise=True))
-        # 체인 평탄화 + self-map 제거
+        with self._lock:  # Kiwi.analyze 동시 호출 직렬화 (동시 빌드 방어)
+            rename: dict[str, str] = {}
+            # 클래스 (우선) — 아래 인스턴스/속성 맵과 키가 충돌하면 클래스 canonical 이 승자.
+            cls_names = [c.get("name", "") for c in concepts.get("classes", []) if c.get("name")]
+            rename.update(self._rename_by_key(cls_names))
+            # 인스턴스 — 클래스 맵과 모순되는 항목(같은 k 또는 역방향 k↔v)은 버린다.
+            #   3개 독립 맵을 무조건 update 로 합치면 교차 사이클(클래스 맵 A→B +
+            #   인스턴스 맵 B→A)이 가능하고, 사이클은 아래 평탄화 while 을 무한루프로
+            #   만들어 취소 불능 to_thread 안에서 좀비 빌드가 된다(0711 적대리뷰 HIGH).
+            inst_names = [e.get("entity", "") for ents in ner_entities.values() for e in ents]
+            for k, v in self._rename_by_key(inst_names).items():
+                if k not in rename and rename.get(v) != k:
+                    rename[k] = v
+            # ObjectProperty (영문 노이즈 제거) — 동일한 모순 필터.
+            prop_names = [p.get("name", "") for p in concepts.get("object_properties", []) if p.get("name")]
+            for k, v in self._rename_by_key(prop_names, strip_en_noise=True).items():
+                if k not in rename and rename.get(v) != k:
+                    rename[k] = v
+        # 체인 평탄화 + self-map 제거. visited 가드 — 위 필터가 놓친 어떤 형태의
+        # 사이클(3항 이상 순환 등)도 종료를 보장(재방문 시 그 지점에서 멈춤).
         flat = {}
         for k, v in rename.items():
             if not k or not v:
                 continue
-            while v in rename and rename[v] != v:
+            visited = {k}
+            while v in rename and rename[v] != v and v not in visited:
+                visited.add(v)
                 v = rename[v]
             if k != v:
                 flat[k] = v
@@ -95,17 +110,30 @@ class DeterministicDedup:
                 seen_cls.add(nm)
                 new_cls.append({**c, "name": nm})
         concepts = {**concepts, "classes": new_cls}
-        # 계층 rename
-        concepts["class_hierarchy"] = [
-            {"parent": r(h.get("parent")), "child": r(h.get("child"))}
-            for h in concepts.get("class_hierarchy", [])
-            if r(h.get("parent")) != r(h.get("child"))
-        ]
-        # 엔티티 class rename
+        # 계층 rename + pair 중복 제거 — rename 으로 서로 다른 pair 가 같은 pair 로
+        # 수렴하면((A,C)+(B,C), B→A) 중복이 재생성되므로 여기서 걸러야 한다(0711).
+        seen_pairs: set = set()
+        new_hier = []
+        for h in concepts.get("class_hierarchy", []):
+            p, c = r(h.get("parent")), r(h.get("child"))
+            if p != c and (p, c) not in seen_pairs:
+                seen_pairs.add((p, c))
+                new_hier.append({"parent": p, "child": c})
+        concepts["class_hierarchy"] = new_hier
+        # 엔티티 이름+class rename — 이전 구현은 class 만 바꾸고 entity 이름은 방치해
+        # "인스턴스 병합"이 사실상 no-op 이었다(0711 적대리뷰: 삼성전자/삼성 전자가
+        # Fuseki 에 URI 2개로 남음). 이름까지 canonical 로 치환.
         ner_entities = {
-            doc: [{**e, "class": r(e.get("class"))} for e in ents]
+            doc: [{**e, "entity": r(e.get("entity")), "class": r(e.get("class"))}
+                  for e in ents]
             for doc, ents in ner_entities.items()
         }
-        # 관계 predicate rename
-        relations = [{**rel, "predicate": r(rel.get("predicate"))} for rel in relations]
+        # 관계 S·P·O 전부 rename — predicate 만 바꾸면 subject/object 가 병합 전
+        # 이름으로 남아 인스턴스 노드와 어긋난다. rename 후 self-loop 는 버림.
+        relations = [
+            {**rel, "subject": r(rel.get("subject")),
+             "predicate": r(rel.get("predicate")), "object": r(rel.get("object"))}
+            for rel in relations
+            if r(rel.get("subject")) != r(rel.get("object"))
+        ]
         return concepts, ner_entities, relations, data_properties
