@@ -353,3 +353,129 @@ def test_relation_vv_predicate_and_xsn():
     tris2 = r.extract("보험회사는 다른 보험회사의 선임계리사를 해당 보험회사의 선임계리사로 선임할 수 없다",
                       source_chunks=["c"])
     assert all(t["object"] != "리사" and t["subject"] != "리사" for t in tris2)  # 표면 파손 없음
+
+
+# ---------------- 인용 온톨로지 (v0.8, 0712 PoC 라이브러리화) ----------------
+
+def test_citation_pairs_basic():
+    """같은 그룹 안에서만 키 해석 + 자기인용·중복 제외."""
+    from ontokit.citations import extract_citation_pairs
+    docs = [
+        {"doc_id": "A", "law": "보험업법", "article_no": "제1조",
+         "text": "제2조 및 제2조에 따라, 제1조는 자기다"},
+        {"doc_id": "B", "law": "보험업법", "article_no": "제2조", "text": "본문"},
+        {"doc_id": "C", "law": "은행법", "article_no": "제2조", "text": "제1조 참조"},
+        {"doc_id": "D", "law": "은행법", "article_no": "제1조", "text": ""},
+    ]
+    pairs = extract_citation_pairs(docs)
+    assert pairs == [("A", "B"), ("C", "D")]  # 그룹 경계·자기인용·중복 전부 반영
+
+
+def test_citation_collector_streaming_equals_batch():
+    """청크 단위 스트리밍 add == 일괄 추출 (빌드 파이프라인 등가성)."""
+    from ontokit.citations import CitationCollector, extract_citation_pairs
+    docs = [
+        {"doc_id": "A", "law": "L", "article_no": "제3조", "text": "제4조와 제5조의2를 본다"},
+        {"doc_id": "B", "law": "L", "article_no": "제4조", "text": "제3조로 돌아간다"},
+        {"doc_id": "C", "law": "L", "article_no": "제5조의2", "text": ""},
+    ]
+    batch = extract_citation_pairs(docs)
+    col = CitationCollector()
+    for d in docs:  # 텍스트를 청크 2개로 쪼개 스트리밍
+        t = d["text"]; mid = len(t) // 2
+        col.add(d["doc_id"], group=d["law"], key=d["article_no"], text=t[:mid])
+        col.add(d["doc_id"], group=d["law"], key=d["article_no"], text=t[mid:])
+    # 청크 절단으로 표기가 끊길 수 있어 상집합 비교가 아닌: 절단 없는 지점 기준 동일성
+    col2 = CitationCollector()
+    for d in docs:
+        col2.add(d["doc_id"], group=d["law"], key=d["article_no"], text=d["text"])
+    assert col2.pairs() == batch == [("A", "B"), ("A", "C"), ("B", "A")]
+
+
+def test_citation_no_keys_is_noop():
+    """key 메타데이터 전무 → pairs 빈 리스트 (오연결 대신 무동작)."""
+    from ontokit.citations import extract_citation_pairs
+    docs = [{"doc_id": "A", "text": "제2조 참조"}, {"doc_id": "B", "text": "제1조"}]
+    assert extract_citation_pairs(docs) == []
+
+
+def test_citation_sparql_and_ttl_encoding():
+    """URI percent-encode 왕복 + DROP/INSERT 멱등 형태 + 빈 pairs 는 DROP 만."""
+    from urllib.parse import unquote
+    from ontokit.citations import (citations_insert_update, citations_to_ttl, doc_uri)
+    ns = "https://w3id.org/xgen-domain#"
+    pairs = [("보험업법_제81조.txt", "보험업법_제141조.txt")]
+    stmts = citations_insert_update(pairs, "urn:g", namespace=ns)
+    assert stmts[0].startswith("DROP SILENT GRAPH")
+    assert "INSERT DATA { GRAPH <urn:g>" in stmts[1]
+    u = doc_uri(ns, "보험업법_제81조.txt")
+    assert " " not in u and unquote(u.rsplit("/", 1)[1]) == "보험업법_제81조.txt"
+    ttl = citations_to_ttl(pairs, namespace=ns)
+    assert ttl.count("<") == 3 and ttl.strip().endswith(".")
+    assert citations_insert_update([], "urn:g") == ["DROP SILENT GRAPH <urn:g>"]
+
+
+def test_citation_masks_other_scope_refs():
+    """「타법」 제N조는 같은 그룹 제N조로 오연결하지 않음 (거짓 엣지 > 누락)."""
+    from ontokit.citations import extract_citation_pairs
+    docs = [
+        {"doc_id": "A", "law": "보험업법", "article_no": "제1조",
+         "text": "「은행법」 제4조에도 불구하고 제5조를 따른다"},
+        {"doc_id": "B", "law": "보험업법", "article_no": "제4조", "text": ""},
+        {"doc_id": "C", "law": "보험업법", "article_no": "제5조", "text": ""},
+    ]
+    assert extract_citation_pairs(docs) == [("A", "C")]  # 제4조 오연결 없음
+    # 마스킹 끄면(mask_pattern=None) 종전 동작
+    assert extract_citation_pairs(docs, mask_pattern=None) == [("A", "B"), ("A", "C")]
+
+
+def test_citation_masks_samelaw_alias():
+    """'같은 법/동법 제N조' 별칭은 자기 스코프로 해석하지 않음 (R2 적대검증 적발)."""
+    from ontokit.citations import extract_citation_pairs
+    docs = [
+        {"doc_id": "A", "law": "여신전문금융업법 시행령", "article_no": "제6조의8",
+         "text": "같은 법 제4조에 따른 등록을 하고 동법 제5조를 지키며 제7조를 따른다"},
+        {"doc_id": "B", "law": "여신전문금융업법 시행령", "article_no": "제4조", "text": ""},
+        {"doc_id": "C", "law": "여신전문금융업법 시행령", "article_no": "제5조", "text": ""},
+        {"doc_id": "D", "law": "여신전문금융업법 시행령", "article_no": "제7조", "text": ""},
+    ]
+    assert extract_citation_pairs(docs) == [("A", "D")]  # 같은법/동법 오연결 없음
+
+
+def test_citation_chunk_boundary_mask_carry():
+    """청크 경계에서 갈라진 「타법」제N조 도 캐리로 마스킹 (경계 거짓엣지 차단)."""
+    from ontokit.citations import CitationCollector
+    col = CitationCollector()
+    col.add("A", group="보험업법", key="제1조", text="이 조는 「은행법")
+    col.add("A", group="보험업법", key="제1조", text="」 제4조에 따른다")
+    col.add("B", group="보험업법", key="제4조", text="")
+    assert col.pairs() == []  # 경계 분리에도 은행법 제4조 오연결 없음
+    # 경계에서 갈라진 참 인용은 캐리로 회수
+    col2 = CitationCollector()
+    col2.add("A", group="L", key="제1조", text="다음은 제4")
+    col2.add("A", group="L", key="제1조", text="조에 따른다")
+    col2.add("B", group="L", key="제4조", text="")
+    assert col2.pairs() == [("A", "B")]
+
+
+def test_citation_tail_carry_no_truncated_mask_bypass():
+    """캐리 절단점이 「…」 내부에 떨어져도 마스킹 무력화 거짓 엣지 없음 (R3 A' repro)."""
+    from ontokit.citations import CitationCollector
+    col = CitationCollector()
+    # 청크1: 완결된 「은행법」 제9조 (정상 마스킹됨) + 꼬리 100자 절단점이 표현 내부에
+    # 오도록 뒤를 짧게 — 캐리에 "법」 제9조…"만 실리는 상황
+    chunk1 = "본문 " * 30 + "「은행법」 제9조에 따른다" + " 끝" * 20
+    col.add("A", group="보험업법", key="제1조", text=chunk1)
+    col.add("A", group="보험업법", key="제1조", text="다음 청크 본문")
+    col.add("B", group="보험업법", key="제9조", text="")
+    assert col.pairs() == []  # 캐리 재스캔이 제9조를 거짓 엣지로 만들지 않음
+    # 대조: 경계 걸침 참 인용 회수는 유지 (직전 테스트와 동일 보장 재확인)
+    col2 = CitationCollector()
+    col2.add("A", group="L", key="제1조", text="다음은 제4")
+    col2.add("A", group="L", key="제1조", text="조에 따른다")
+    col2.add("B", group="L", key="제4조", text="")
+    assert col2.pairs() == [("A", "B")]
+    # 메모리 상한: 다음 문서로 넘어가면 직전 문서 꼬리 해제
+    assert "A" not in col2._tails or col2._last_doc == "A"
+    col2.add("C", group="L", key="제7조", text="x")
+    assert "A" not in col2._tails and "B" not in col2._tails

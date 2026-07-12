@@ -23,11 +23,17 @@ from .builder.ontology_builder import OntologyBuilder
 from .morphology.en_nouns import EnglishNounExtractor
 from .ner.english import EnglishNER
 from .utils.lang_detect import detect_lang
+from .citations import (
+    CitationCollector, extract_citation_pairs, citations_to_ttl,
+    citations_insert_update, doc_uri, KO_LAW_ARTICLE,
+)
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = [
     "Extractor", "GraphStore", "VectorStore", "LLM",
     "DeterministicKoreanExtractor", "merge_concepts",
     "DeterministicDedup", "DeterministicOWLGenerator", "OntologyBuilder",
     "EnglishNounExtractor", "EnglishNER", "detect_lang",
+    "CitationCollector", "extract_citation_pairs", "citations_to_ttl",
+    "citations_insert_update", "doc_uri", "KO_LAW_ARTICLE",
 ]
