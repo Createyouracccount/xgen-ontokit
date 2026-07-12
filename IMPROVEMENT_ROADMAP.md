@@ -1,4 +1,10 @@
-# ontokit 개선 로드맵 (2026-07-10)
+# ontokit 개선 로드맵 (2026-07-10, 상태갱신 07-12)
+
+> **0712 상태갱신**: 이 문서 이후 v0.8 인용 온톨로지(`citations.py`)·v0.9 클래스
+> 승격 필터(`filter/class_promotion.py`)가 추가됐다. v0.9 필터는 아래 "노이즈 관리
+> 원칙 1순위(빈도/허브 필터)"의 클래스판 구현이다(df≥2 ∨ 구조참여, 목록 0).
+> Tier 1 두 항목(Hearst 정의문 배선, co-occurrence 관계)은 **여전히 미착수** —
+> 관계 밀도(트리플의 1.1%) 확충의 직접 레버로 유효하다.
 
 한국어 LLM-free 온톨로지 추출기(ontokit)의 남은 개선 여지를 정리한다. 두 조사
 문서(`docs/프롬프트/ontology_search.txt`, `ontology_prompt_all.txt`)의 39개 기법과
