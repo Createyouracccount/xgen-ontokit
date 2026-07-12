@@ -640,3 +640,122 @@ def test_cooccurrence_korean_josa_ending():
     assert not ok("조선엔")           # 조선 + 에 + ㄴ
     for good in ("조선", "대한민국", "금융위원회", "보험회사"):
         assert ok(good), good
+
+
+def _fake_llm(reply='{"triples":[{"s":"금융위원회","p":"감독","o":"은행"}]}'):
+    """테스트용 LLM 스텁 — 고정 응답 + 호출 카운트."""
+    class _L:
+        def __init__(self): self.calls = 0
+        def generate(self, prompt, *, system="", timeout=None):
+            self.calls += 1
+            return reply
+    return _L()
+
+
+def test_hybrid_budget_zero_equals_pure_rule():
+    """예산 0 → LLM 호출 0 → 순수 규칙과 동일(LLM-free 불변식)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
+    llm = _fake_llm()
+    chunks = [{"chunk_id": "c0", "chunk_text": "고양이는 물고기를 좋아한다."},
+              {"chunk_id": "c1", "chunk_text": "여기 관계 없는 파편 텍스트."}]
+    h = HybridRelationExtractor(llm=llm, budget=BudgetGuard(max_chunk_pct=0.0, max_usd=0.0))
+    rels, rep = asyncio.run(h.extract_corpus(chunks))
+    assert llm.calls == 0, "예산 0인데 LLM 호출됨"
+    assert rep["llm_called"] == 0 and rep["spent_usd"] == 0.0
+    # 규칙 없이(llm=None) 돌린 것과 관계 수 동일해야
+    h2 = HybridRelationExtractor(llm=None)
+    rels2, _ = asyncio.run(h2.extract_corpus(chunks))
+    assert len(rels) == len(rels2)
+
+
+def test_hybrid_chunk_pct_hard_cap():
+    """청크 비율 상한이 하드 상한 — 후보 많아도 상한 초과 호출 없음."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
+    llm = _fake_llm()
+    # 10개 전부 규칙 0건 후보 → 20% 상한이면 정확히 2회만
+    chunks = [{"chunk_id": f"c{i}", "chunk_text": f"파편텍스트{i} 조사없음"} for i in range(10)]
+    h = HybridRelationExtractor(llm=llm, budget=BudgetGuard(max_chunk_pct=0.2, max_usd=None))
+    rels, rep = asyncio.run(h.extract_corpus(chunks))
+    assert llm.calls == 2, f"20% 상한인데 {llm.calls}회 호출"
+    assert rep["llm_called"] == 2 and rep["budget_skipped"] == 8
+
+
+def test_hybrid_usd_hard_cap():
+    """달러 상한이 하드 상한 — 사전 판정으로 초과 방지."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
+    llm = _fake_llm()
+    chunks = [{"chunk_id": f"c{i}", "chunk_text": "가"*3000 + " 조사없는파편"} for i in range(20)]
+    # 청크당 사전판정 ~$0.011(3000자in + max_output_chars 1200자out). cap $0.025면 2회.
+    b = BudgetGuard(max_chunk_pct=None, max_usd=0.025,
+                    price_per_1k_input=0.005, price_per_1k_output=0.015,
+                    max_output_chars=1200)
+    h = HybridRelationExtractor(llm=llm, budget=b)
+    rels, rep = asyncio.run(h.extract_corpus(chunks))
+    # 고정 소형 출력(fake)이라 실제 회계는 사전판정보다 작음 → 상한 내
+    assert rep["spent_usd"] <= 0.025, f"상한 초과: {rep['spent_usd']}"
+    assert 2 <= llm.calls <= 3
+
+
+def test_hybrid_topup_recovers_relation():
+    """규칙 0건 청크를 LLM 이 보강 — origin='llm_topup' 태깅."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
+    llm = _fake_llm()
+    chunks = [{"chunk_id": "c0", "chunk_text": "조사없는 명사 나열 파편 조각"}]
+    h = HybridRelationExtractor(llm=llm, budget=BudgetGuard(max_chunk_pct=1.0))
+    rels, rep = asyncio.run(h.extract_corpus(chunks))
+    topups = [r for r in rels if r.get("origin") == "llm_topup"]
+    assert len(topups) == 1 and topups[0]["subject"] == "금융위원회"
+    assert rep["llm_triples"] == 1
+
+
+def test_hybrid_usd_cap_overshoot_bounded():
+    """달러 상한: 문자근사+대형출력이면 최대 1호출 초과, 그 후 유한 정지(R2 MED)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
+    # LLM이 대형 출력(200관계≈6000자) 반환 — 사전판정(max_output_chars=1200) 초과
+    big_reply = '{"triples":[' + ",".join(
+        '{"s":"금융위원회","p":"감독%d","o":"은행"}' % i for i in range(200)) + ']}'
+    llm = _fake_llm(big_reply)
+    chunks = [{"chunk_id": f"c{i}", "chunk_text": "조사없는 파편 조각들"} for i in range(20)]
+    # cap을 5호출분 정도로 잡아도, 대형출력이면 1호출 후 정지해야(유한 초과)
+    b = BudgetGuard(max_chunk_pct=None, max_usd=0.02,
+                    price_per_1k_input=0.005, price_per_1k_output=0.015,
+                    max_output_chars=1200)
+    h = HybridRelationExtractor(llm=llm, budget=b)
+    _, rep = asyncio.run(h.extract_corpus(chunks))
+    # 초과는 유한: 사후 회계가 상한 넘겨도 이후 전량 거부 → 무한증가 없음
+    assert rep["llm_called"] <= 3, f"대형출력인데 {rep['llm_called']}회 (유한 정지 실패)"
+    # usage 콜백도 사전판정은 근사라 첫 호출 초과는 못 막음 — '유한 정지'만 보장.
+    # (진짜 하드는 LLM max_tokens 물리제한 필요 — docstring 공시)
+    def usage_ex(_res):
+        return {"input_tokens": 20, "output_tokens": 2000}   # ≈$0.03/호출
+    llm2 = _fake_llm(big_reply)
+    b2 = BudgetGuard(max_chunk_pct=None, max_usd=0.02,
+                     price_per_1k_input=0.005, price_per_1k_output=0.015)
+    h2 = HybridRelationExtractor(llm=llm2, budget=b2, usage_extractor=usage_ex)
+    _, rep2 = asyncio.run(h2.extract_corpus(chunks))
+    assert rep2["llm_called"] == 1, "첫 초과 후 유한 정지 실패"  # 1호출로 상한 넘고 정지
