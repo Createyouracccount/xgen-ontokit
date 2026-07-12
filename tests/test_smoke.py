@@ -601,6 +601,42 @@ def test_cooccurrence_truncation_and_stats():
     assert len(col._ent_df) == 3
 
 
+def test_cooccurrence_degree_cap():
+    """허브 도미네이션 억제 — 노드당 방출 엣지 max_degree 상한(0713 R2 결함).
+
+    허브 H 가 모든 노드와 만나는 별그래프에서, H 의 방출 엣지가 max_degree 로
+    제한되고 강한(count 높은) 연관부터 남는지 검증. 통계 공시도 확인.
+    """
+    from ontokit.cooccurrence import CooccurrenceCollector
+    col = CooccurrenceCollector(min_pair_df=1, lift_k=0.0, max_degree=3,
+                                label_ok=None)
+    # 허브 H 가 P0..P9 각각과 여러 청크서 동시출현(count 차등: P0 최다 → P9 최소)
+    for i in range(10):
+        for rep in range(10 - i):          # P0: 10회, P9: 1회
+            col.add_chunk(f"c{i}_{rep}", [("H", "허브"), (f"P{i}", f"주변{i}")])
+    edges = col.edges()
+    # H 의 방출 엣지 ≤ 3
+    h_edges = [(a, b, c) for a, b, c in edges if "H" in (a, b)]
+    assert len(h_edges) <= 3, h_edges
+    # 강한 연관(P0·P1·P2)이 남고 약한(P9)은 절단
+    partners = {a if b == "H" else b for a, b, c in h_edges}
+    assert "P0" in partners and "P9" not in partners, partners
+    assert col.stats["edges_degree_capped"] > 0
+
+
+def test_cooccurrence_degree_cap_disabled():
+    """max_degree=None 이면 무제한(하위호환) — 허브 전 엣지 방출."""
+    from ontokit.cooccurrence import CooccurrenceCollector
+    col = CooccurrenceCollector(min_pair_df=1, lift_k=0.0, max_degree=None,
+                                label_ok=None)
+    for i in range(10):
+        col.add_chunk(f"c{i}", [("H", "허브"), (f"P{i}", f"주변{i}")])
+    edges = col.edges()
+    h_edges = [e for e in edges if "H" in (e[0], e[1])]
+    assert len(h_edges) == 10
+    assert col.stats["edges_degree_capped"] == 0
+
+
 def test_cooccurrence_fragment_rejection():
     """NER 파편 형태 거부 — 괄호·고립인용부호·라틴미소(소문자시작). 목록 0."""
     from ontokit.cooccurrence import default_label_ok as ok
@@ -637,9 +673,15 @@ def test_cooccurrence_korean_josa_ending():
         import pytest; pytest.skip("kiwipiepy 미설치")
     from ontokit.cooccurrence import make_korean_label_ok
     ok = make_korean_label_ok()
-    assert not ok("조선엔")           # 조선 + 에 + ㄴ
-    for good in ("조선", "대한민국", "금융위원회", "보험회사"):
+    # 정상 거부 — Kiwi 가 조사종결로 정분석하는 케이스(0713 R2 실측)
+    for bad in ("조선엔", "인천이", "국회의", "일제강점기에"):
+        assert not ok(bad), bad
+    for good in ("조선", "대한민국", "금융위원회", "보험회사", "인천", "일제강점기"):
         assert ok(good), good
+    # ⚠️ 알려진 한계(0713 R2): Kiwi 오분석 케이스는 못 잡는다. '베트남와'를
+    # 베트남+오(VV)+어(EF)로 오독 → 조사 아님으로 통과. 목록-0 원칙상 결정
+    # 규칙으로 안전 제거 불가(상류 dedup 몫). 회귀 감시용으로 현 동작을 고정.
+    assert ok("베트남와")  # 통과 = 알려진 결함(수정 시 이 단언 뒤집을 것)
 
 
 def _fake_llm(reply='{"triples":[{"s":"금융위원회","p":"감독","o":"은행"}]}'):

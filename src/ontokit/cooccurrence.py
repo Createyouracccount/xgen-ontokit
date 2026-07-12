@@ -11,6 +11,9 @@
      승격 필터의 df>=2 와 같은 termhood 논리).
   ② lift > lift_k — c·N > k·df_a·df_b (PMI > log k 와 동형). 허브 엔티티끼리
      우연히 자주 만나는 쌍(mixed20k 실측 '미국-선수' lift 1.45) 배제.
+  ③ max_degree — 노드당 방출 엣지 상한(허브 도미네이션 억제). df·lift 는 쌍
+     단위라 초고빈도 허브가 수백 엣지를 독점(mixed20k 실측 '대한민국' 표본 84%)
+     하는 것을 못 막는다. count 내림차순 노드별 상한으로 롱테일 노이즈 절단.
 - 술어는 '관련'이 아니라 **함께언급(coOccursWith)**:
   ① 동시출현은 결정적으로 참 — 의미관계('X가 Y와 관련')를 단정하지 않는
      정직한 술어. ② 검색측 술어게이트(_seed_relational, 질문어-술어라벨
@@ -29,6 +32,12 @@
   수백만 청크 규모는 미검증(청크당 상한이 상계를 잡지만 실측 필요).
 - 영어 서브워드 파편 라벨('ikos' 류 NER 아티팩트)은 어휘 없이 결정적 판별
   불가 — v1 미처리(pair df·lift 가 부분 억제).
+- ⚠️ 조사종결 규칙(make_korean_label_ok, toks[-1].tag=='J*')은 Kiwi 분석에
+  의존한다. '인천이'(이=JKS)·'국회의'(의=JKG)·'일제강점기에'(에=JKB)는 정상
+  거부되나, **Kiwi 오분석 케이스는 못 잡는다** — '베트남와'를 Kiwi 가 베트남+
+  오(VV)+어(EF)로 오독(와=조사 아님)해 통과한다(0713 R2 실측). '류'(XSN 접미)
+  는 '포유류' 등 정당 접미와 구분 불가라 목록 없이 거부 불가. 이 잔존 파편은
+  df·lift·max_degree 로만 부분 억제 — 목록-0 원칙상 완전제거는 상류 dedup 몫.
 - ⚠️ mixed-case 2글자 거부 규칙은 **일반 코퍼스 가정** — 화학기호(Fe·Cu·Li)·
   단위(Hz·eV)·경칭(Dr·St)을 죽인다. mixed20k 실측상 upstream 2글자 라벨은
   순 파편(Ur·Vm·Ad)이라 유효 손실 0 이었으나, 과학·화학 도메인 코퍼스 이식 시
@@ -138,16 +147,18 @@ class CooccurrenceCollector:
     """
 
     def __init__(self, *, min_pair_df: int = 3, lift_k: float = 2.0,
-                 max_entities_per_chunk: int = 60,
+                 max_entities_per_chunk: int = 60, max_degree: Optional[int] = 30,
                  label_ok: Optional[Callable[[str], bool]] = default_label_ok):
         self.min_pair_df = min_pair_df
         self.lift_k = lift_k
         self.max_entities_per_chunk = max_entities_per_chunk
+        self.max_degree = max_degree
         self.label_ok = label_ok
         self._pair: Counter = Counter()
         self._ent_df: Counter = Counter()
         self._chunks: set = set()
-        self.stats = {"chunks": 0, "entities_rejected": 0, "chunks_truncated": 0}
+        self.stats = {"chunks": 0, "entities_rejected": 0, "chunks_truncated": 0,
+                      "edges_degree_capped": 0}
 
     def add_chunk(self, chunk_id: str, entities: Iterable[tuple[str, str]]) -> None:
         """entities: (key, label) — 같은 청크 내 중복 key 는 1회로 집계."""
@@ -181,6 +192,13 @@ class CooccurrenceCollector:
 
         exclude_pairs: 이미 정밀 관계(SVO)로 연결된 {(a, b)} (양방향 무관 —
         내부에서 정규화). 해당 쌍은 방출하지 않는다.
+
+        max_degree(기본 30): 한 노드가 방출하는 coOcc 엣지 수 상한. df·lift 는
+        쌍 단위 필터라 초고빈도 허브('대한민국')가 중빈도 엔티티와 만드는 쌍은
+        lift 가 커서 통과 → 허브 하나가 수백 엣지를 독점(mixed20k 실측: 600쌍
+        표본 중 '대한민국' 84%). "X 함께언급 대한민국"은 정보량 0 에 수렴하고
+        검색 폴백에서 허브 시드가 무관 대량회수를 유발한다. count 내림차순으로
+        각 노드의 강한 연관 max_degree 개만 남긴다(약한 롱테일=노이즈 절단).
         """
         N = len(self._chunks)
         if N == 0:
@@ -198,6 +216,19 @@ class CooccurrenceCollector:
                 continue
             out.append((a, b, c))
         out.sort(key=lambda t: (-t[2], t[0], t[1]))
+        if self.max_degree is not None:
+            deg: Counter = Counter()
+            capped = []
+            dropped = 0
+            for a, b, c in out:  # 강한 엣지부터 — 노드별 상한 초과분 절단
+                if deg[a] >= self.max_degree or deg[b] >= self.max_degree:
+                    dropped += 1
+                    continue
+                deg[a] += 1
+                deg[b] += 1
+                capped.append((a, b, c))
+            self.stats["edges_degree_capped"] = dropped
+            return capped
         return out
 
 
