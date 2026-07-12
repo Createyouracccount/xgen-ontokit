@@ -479,3 +479,74 @@ def test_citation_tail_carry_no_truncated_mask_bypass():
     assert "A" not in col2._tails or col2._last_doc == "A"
     col2.add("C", group="L", key="제7조", text="x")
     assert "A" not in col2._tails and "B" not in col2._tails
+
+
+# ---------------- 클래스 승격 필터 (v0.9, 0712 mixed20k 44만 과생성 대응) ----------------
+
+def test_class_promotion_gate_and_rules():
+    """지지도 게이트 + 정크 규칙 — 대형 코퍼스 기준."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.filter.class_promotion import ClassPromotionFilter
+    f = ClassPromotionFilter(corpus_chunks=20000)
+    # 고립(df1·무구조) → gate
+    assert f.decide("파트타임농부", df=1).reason == "gate"
+    # df1 이라도 구조 참여 시 생존
+    assert f.decide("수력발전소", df=1, has_rel=True).keep
+    assert f.decide("환경공학", df=1, has_kid=True).keep
+    # 반복 병합 / 지시상대 head / 지시 관형 / 과결합
+    assert f.decide("오에겐자부로오에겐자부로", df=5).reason == "repeat"
+    assert f.decide("통합이전", df=3).reason == "relhead"
+    assert f.decide("오늘날", df=4).reason == "relhead"
+    assert f.decide("해당국가", df=6).reason == "deictic"
+    assert f.decide("교통도로수도고속도로", df=2).reason == "overjoin"
+    # 유효 클래스 생존 (관형 수식은 동격 병합과 달리 유지)
+    for ok in ("텔레비전진행자", "상호방위조약", "고대일본어", "미국증권거래위원회"):
+        assert f.decide(ok, df=3).keep, ok
+
+
+def test_class_promotion_small_corpus_gate_off():
+    """소형 코퍼스(finreg류)는 지지도 게이트 자동 비활성 — 유효 df1 개념 보존."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.filter.class_promotion import ClassPromotionFilter
+    f = ClassPromotionFilter(corpus_chunks=489)
+    assert f.decide("매출채권", df=1).keep      # 게이트 비활성
+    assert f.decide("합병절차", df=1).keep
+    assert f.decide("해당요구", df=1).reason == "deictic"  # 정크 규칙은 상시
+    # corpus_chunks 미상(None) → 게이트 비활성 (fail-open: 잔존 > 오삭제)
+    assert ClassPromotionFilter().decide("파트타임농부", df=1).keep
+
+
+def test_class_promotion_noun_reading_preference():
+    """단독 재분석 오탐 방지 — top-3 명사 독법 우선 (예금/주기/실제명의 finreg 실측)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.filter.class_promotion import ClassPromotionFilter
+    small = ClassPromotionFilter(corpus_chunks=489)
+    for w in ("예금", "주기", "과다", "실제명의", "매출채권"):
+        assert small.decide(w, df=1).keep, w
+    # 법령 긴 복합어는 소형 코퍼스에서 과결합 미적용
+    assert small.decide("한국채택국제회계기준", df=1).keep
+    assert small.decide("기업구조개선기관전용사모집합투자기구", df=1).keep
+    # 대형 코퍼스에선 과결합 활성 유지
+    big = ClassPromotionFilter(corpus_chunks=20000)
+    assert big.decide("교통도로수도고속도로", df=2).reason == "overjoin"
+
+
+def test_class_promotion_instance_holder_survives():
+    """인스턴스를 거느린 df1 클래스는 게이트 생존 — 고아 인스턴스 방지."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.filter.class_promotion import ClassPromotionFilter
+    f = ClassPromotionFilter(corpus_chunks=20000)
+    assert f.decide("희귀유형", df=1).reason == "gate"
+    assert f.decide("희귀유형", df=1, has_inst=True).keep
