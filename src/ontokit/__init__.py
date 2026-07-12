@@ -28,8 +28,9 @@ from .citations import (
     citations_insert_update, doc_uri, KO_LAW_ARTICLE,
 )
 from .filter.class_promotion import ClassPromotionFilter, PromotionDecision
+from .cooccurrence import CooccurrenceCollector, default_label_ok, make_korean_label_ok
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 __all__ = [
     "Extractor", "GraphStore", "VectorStore", "LLM",
     "DeterministicKoreanExtractor", "merge_concepts",
@@ -38,4 +39,5 @@ __all__ = [
     "CitationCollector", "extract_citation_pairs", "citations_to_ttl",
     "citations_insert_update", "doc_uri", "KO_LAW_ARTICLE",
     "ClassPromotionFilter", "PromotionDecision",
+    "CooccurrenceCollector", "default_label_ok", "make_korean_label_ok",
 ]

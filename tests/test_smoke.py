@@ -550,3 +550,93 @@ def test_class_promotion_instance_holder_survives():
     f = ClassPromotionFilter(corpus_chunks=20000)
     assert f.decide("희귀유형", df=1).reason == "gate"
     assert f.decide("희귀유형", df=1, has_inst=True).keep
+
+
+def test_cooccurrence_selection():
+    """통계 선별 — pair df·lift 만으로 우연쌍·허브쌍 배제 (목록 0)."""
+    from ontokit.cooccurrence import CooccurrenceCollector
+    col = CooccurrenceCollector(min_pair_df=2, lift_k=2.0)
+    # A·B 는 3회 함께(강결합), 허브 H 는 모든 청크 등장(우연 결합)
+    for i in range(3):
+        col.add_chunk(f"c{i}", [("A", "안카라"), ("B", "안카라주"), ("H", "미국")])
+    for i in range(3, 10):
+        col.add_chunk(f"c{i}", [("H", "미국"), (f"X{i}", f"기타{i}")])
+    got = col.edges()
+    pairs = {(a, b) for a, b, _ in got}
+    assert ("A", "B") in pairs                      # 강결합 생존
+    assert ("A", "H") not in pairs and ("B", "H") not in pairs  # 허브 lift 탈락
+    # count 내림차순 + 정규순서(a<b)
+    assert all(a < b for a, b, _ in got)
+
+
+def test_cooccurrence_label_filter_and_exclude():
+    """형태 라벨 자격(달력파편·기호심장·반복) + SVO 기연결 쌍 제외."""
+    from ontokit.cooccurrence import CooccurrenceCollector, default_label_ok
+    # 형태규칙: 언어무관 결정적
+    assert not default_label_ok("0년")          # 달력 파편
+    assert not default_label_ok("월_1일")
+    assert not default_label_ok("1세기")
+    assert not default_label_ok("____")         # 기호 심장
+    assert not default_label_ok("금융위금융위")   # 이중반복(6자+, 클래스필터와 동일 조건)
+    assert default_label_ok("연도별평가")        # 달력단위 포함해도 잔여 있으면 유효
+    assert default_label_ok("Ankara_Province")  # 라틴 유효
+    col = CooccurrenceCollector(min_pair_df=2, lift_k=0.0)
+    for i in range(2):
+        col.add_chunk(f"c{i}", [("A", "제네바"), ("B", "0년"), ("C", "협약")])
+    got = {(a, b) for a, b, _ in col.edges()}
+    assert got == {("A", "C")}                   # 정크 라벨 쌍 전부 배제
+    # SVO 기연결 쌍 제외 (방향 무관 정규화)
+    assert col.edges(exclude_pairs={("C", "A")}) == []
+
+
+def test_cooccurrence_truncation_and_stats():
+    """허브 청크 절단은 결정적 + 통계 공시(무증상 절단 금지)."""
+    from ontokit.cooccurrence import CooccurrenceCollector
+    col = CooccurrenceCollector(max_entities_per_chunk=3)
+    ents = [(f"E{i:02d}", f"라벨{i:02d}") for i in range(10)]
+    col.add_chunk("c0", ents)
+    col.add_chunk("c0", ents)  # 중복 청크 무시
+    assert col.stats["chunks"] == 1
+    assert col.stats["chunks_truncated"] == 1
+    assert len(col._ent_df) == 3
+
+
+def test_cooccurrence_fragment_rejection():
+    """NER 파편 형태 거부 — 괄호·고립인용부호·라틴미소(소문자시작). 목록 0."""
+    from ontokit.cooccurrence import default_label_ok as ok
+    # 구두점 파편
+    for bad in ("' Union", "Regional ) League", "Margaret (", 'Mike "', "ton '"):
+        assert not ok(bad), bad
+    # 라틴 미소 파편(소문자 시작, 최장 알파벳연쇄 ≤2) + mixed-case 2글자(Ah/Re/Uk)
+    for bad in ("ho", "co", "ra", "ur", "pi", "yt", "ko", "us PP.",
+                "Ah", "Re", "Ma", "Uk", "Je"):
+        assert not ok(bad), bad
+    # 보존: all-caps 약어·모델명(대문자 시작), 군주 서수(긴 본체), 다국어, 중간 어포스트로피
+    for good in ("SI", "OH", "PS2", "An-26", "Elizabeth I", "Haakon V",
+                 "대한민국", "Ankara", "United States", "Val d ' Oise"):
+        assert ok(good), good
+
+
+def test_cooccurrence_number_and_edge_fragment():
+    """독립 숫자 토큰·가장자리 구두점 파편 거부 — 약어(U.S./Inc.)·모델명은 보존."""
+    from ontokit.cooccurrence import default_label_ok as ok
+    # 한글+독립숫자 잘림 거부, 구두점 파편 거부
+    for bad in ("고려 892", "제1조 2", "North Rhine -", ". Michael"):
+        assert not ok(bad), bad
+    # 영어 '이름+숫자' 명명은 보존(R2 N1) + 약어·모델명 보존
+    for good in ("U.S.", "Inc.", "Jr.", "AH-64 아파치", "B-1A", "New South Wales",
+                 "Val d ' Oise", "Ph.D", "Boeing 747", "Apollo 11", "iPhone 12", "Area 51"):
+        assert ok(good), good
+
+
+def test_cooccurrence_korean_josa_ending():
+    """조사 종결 파편('조선엔') 거부 — NER 경계 잘림. kiwi 필요."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.cooccurrence import make_korean_label_ok
+    ok = make_korean_label_ok()
+    assert not ok("조선엔")           # 조선 + 에 + ㄴ
+    for good in ("조선", "대한민국", "금융위원회", "보험회사"):
+        assert ok(good), good

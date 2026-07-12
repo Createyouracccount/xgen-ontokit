@@ -2,7 +2,7 @@
 
 XGEN 온톨로지 **빌드·검색 개선 키트**. 우리가 수정·주입하는 온톨로지 개선을 하나로 말아 XGEN에 주입하는 라이브러리. omnifuse(검색 라이브러리)와 상보 — 이쪽은 **빌드(LLM-free 한국어·영어 추출) + 검색 개선**을 함께 담는다.
 
-## 언어 지원 매트릭스 (v0.9, 정직하게)
+## 언어 지원 매트릭스 (v0.10, 정직하게)
 
 | 축 | 한국어 | 영어 | 혼합 청크 |
 |---|---|---|---|
@@ -71,6 +71,21 @@ keep, reason = f.decide(label, df=df, has_rel=..., has_kid=..., has_inst=...)
 (-84.1%), 관계 트리플 100% 보존. ⚠️고립 df1 유효개념도 지운다(의도된 비용, XGEN 배선은
 사이드카 `<graph>__filtered`로 가역). 근거: `docs/클래스승격필터_과생성해소_2026_07_12.md`.
 
+## 동시출현 약관계 (v0.10) — LLM-free 관계밀도 확충 (언어무관)
+```python
+from ontokit.cooccurrence import CooccurrenceCollector, make_korean_label_ok
+
+col = CooccurrenceCollector(min_pair_df=3, lift_k=2.0, label_ok=make_korean_label_ok())
+col.add_chunk(chunk_id, [(uri, label), ...])   # 청크 스트리밍
+edges = col.edges(exclude_pairs=svo_pairs)      # [(a, b, count)] — SVO 기연결 제외
+```
+같은 청크 동시출현 엔티티쌍을 `coOccursWith`(함께언급) 약관계로 방출 — SVO(한국어 전용)가
+못 채우는 관계밀도·영어권을 결정적으로 확충. 선별은 통계만(pair df≥3 ∧ lift>2, 목록 0),
+라벨 자격은 형태·품사(달력·구두점·숫자토큰·라틴 미소·mixed-case 파편·조사 종결·단독
+의존명사·충돌 싱크). mixed20k 실측: 1.75%→10.5%, SVO 100% 보존, 표시 정크율 ~18%.
+⚠️coarse 관계(종류 없음), 소비측은 SVO 우선 + co-occ 폴백 슬롯. 잘림·병합 파편(`대구광역`)은
+형태 판별 밖(상류 NER). 근거: `docs/관계밀도_coOccursWith_확충_2026_07_12.md`.
+
 ## 검색 개선
 ```python
 from ontokit.search import class_instances_triple, blend_score
@@ -97,6 +112,7 @@ src/ontokit/
 ├── ner/                  # koelectra(ko) + english(dslim BERT MIT)
 ├── citations.py          # doc-level :cites 인용 수집·SPARQL 방출 (v0.8)
 ├── filter/               # class_promotion — termhood 승격 게이트 (v0.9)
+├── cooccurrence.py       # coOccursWith 동시출현 약관계 — 관계밀도 확충 (v0.10)
 └── search/               # improvements (subClassOf*, floor guard) — ⚠️XGEN 전용
 ```
 
@@ -109,7 +125,7 @@ src/ontokit/
 
 ```bash
 pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git"
-# 버전 고정(권장): ...xgen-ontokit.git@v0.9.0
+# 버전 고정(권장): ...xgen-ontokit.git@v0.10.0
 ```
 
 XGEN `pyproject.toml` dependencies 또는 requirements에 위 URL 추가.
