@@ -160,6 +160,123 @@ def test_corpus_level_relation_integration():
     assert rels[0]["source_chunks"] == ["c1"]
 
 
+def test_hybrid_budget_max_usd_hard_cap():
+    """max_usd 하드 상한 — 달러 예산 초과 직전 정지, 초과 지출 없음 (0713 가드레일).
+
+    출력이 max_output_chars 가정을 넘으려 해도, can_call 이 '한 콜이 상한을 넘을 수
+    있으면 시작 안 함'으로 막아 spent_usd 는 max_usd 를 절대 초과하지 않는다."""
+    import asyncio
+    from ontokit.extractors.relation_hybrid import (
+        HybridRelationExtractor, BudgetGuard)
+
+    calls = {"n": 0}
+
+    # 매 호출 큰 출력(관계 다수) 방출 — 실지출이 콜당 유의미하게 쌓이도록.
+    _big_o = "목" * 900  # 출력 목적어 길이 ≈ 콜당 실비용 지배
+    class _GreedyLLM:
+        def generate(self, prompt, *, system="", timeout=None, max_tokens=None):
+            calls["n"] += 1
+            return '{"triples":[{"s":"주","p":"술","o":"%s"}]}' % _big_o
+
+    # 규칙이 0건인 청크 20개(무주어 나열 — 조사 SVO 안 걸림)
+    chunks = [{"chunk_id": "c%d" % i, "chunk_text": "항목 나열 %d." % i}
+              for i in range(20)]
+    # 실지출: 콜당 out≈900자/3/1000*price_out=$0.3(+in 소액). max_usd=$3 →
+    # 실지출이 $3 근처 도달 시 이후 콜은 can_call(spent+예상 > max_usd)로 거부.
+    # 사전판정 예상은 max_output_chars(=900자) 로 실출력과 맞춤(하드 보장).
+    budget = BudgetGuard(max_chunk_pct=None, max_usd=3.0,
+                         price_per_1k_input=0.0, price_per_1k_output=1.0,
+                         max_output_chars=900)
+    h = HybridRelationExtractor(llm=_GreedyLLM(), budget=budget, topup_when="empty")
+    rels, report = asyncio.run(h.extract_corpus(chunks))
+
+    assert budget.spent_usd <= 3.0 + 1e-9, "달러 하드 상한 초과: $%.4f" % budget.spent_usd
+    assert report["llm_called"] < 20, "예산 무시하고 전량 호출됨"
+    assert report["budget_skipped"] > 0, "상한 도달 후 스킵이 없음"
+
+
+def test_hybrid_budget_chunk_pct_hard_cap():
+    """chunk_pct 하드 상한 — 전체 청크의 지정 비율까지만 LLM 호출(호출수 캡)."""
+    import asyncio
+    from ontokit.extractors.relation_hybrid import (
+        HybridRelationExtractor, BudgetGuard)
+
+    class _LLM:
+        def generate(self, prompt, *, system="", timeout=None, max_tokens=None):
+            return '{"triples":[{"s":"a","p":"b","o":"c"}]}'
+
+    chunks = [{"chunk_id": "c%d" % i, "chunk_text": "나열 %d." % i} for i in range(10)]
+    # 10청크 × 0.3 = 3콜 상한. max_usd 무제한(호출수 캡만 시험).
+    budget = BudgetGuard(max_chunk_pct=0.3, max_usd=None)
+    h = HybridRelationExtractor(llm=_LLM(), budget=budget, topup_when="empty")
+    _, report = asyncio.run(h.extract_corpus(chunks))
+    assert report["llm_called"] == 3, "chunk_pct 캡(3) 위반: %d" % report["llm_called"]
+
+
+def test_hybrid_shortest_first_ordering():
+    """예산 빠듯할 때 짧은 청크 우선 — 저수율 긴 청크에 예산 먼저 안 태움
+    (R2 실빌드: 긴청크 우선 → 예산 소진 후 생산적 짧은청크 도달 못해 관계 0)."""
+    import asyncio
+    from ontokit.extractors.relation_hybrid import (
+        HybridRelationExtractor, BudgetGuard)
+
+    called_texts = []
+
+    class _LLM:
+        def generate(self, prompt, *, system="", timeout=None, max_tokens=None):
+            called_texts.append(len(prompt))
+            return '{"triples":[{"s":"a","p":"b","o":"c"}]}'
+
+    # 긴 청크(무수확 가정) + 짧은 청크 섞기. chunk_pct 로 2콜만 허용.
+    chunks = ([{"chunk_id": "long%d" % i, "chunk_text": "긴 나열 " * 500}
+               for i in range(3)]
+              + [{"chunk_id": "short%d" % i, "chunk_text": "짧은 나열 %d." % i}
+                 for i in range(3)])
+    budget = BudgetGuard(max_chunk_pct=2/6, max_usd=None)  # 6청크 중 2콜
+    h = HybridRelationExtractor(llm=_LLM(), budget=budget, topup_when="empty")
+    asyncio.run(h.extract_corpus(chunks))
+    # 짧은 청크(짧은 prompt) 먼저 호출됐는지 — 첫 2콜 prompt 길이가 작아야
+    assert all(pl < 200 for pl in called_texts[:2]), \
+        "짧은 청크 우선 아님: %s" % called_texts[:2]
+
+
+def test_hybrid_disabled_zero_llm():
+    """LLM-free 불변식 — llm=None 이면 LLM 호출 0, 순수 규칙 결과만 (기본 안전)."""
+    import asyncio
+    from ontokit.extractors.relation_hybrid import (
+        HybridRelationExtractor, BudgetGuard)
+
+    chunks = [{"chunk_id": "c1", "chunk_text": "금융위원회는 은행을 감독한다."},
+              {"chunk_id": "c2", "chunk_text": "항목 나열."}]
+    h = HybridRelationExtractor(llm=None, budget=BudgetGuard(max_chunk_pct=1.0))
+    rels, report = asyncio.run(h.extract_corpus(chunks))
+    assert report["llm_called"] == 0, "llm=None 인데 LLM 호출 발생"
+    assert report["llm_triples"] == 0
+    # 규칙은 여전히 동작(금융위원회-감독-은행 류)
+    assert report["rule_triples"] >= 1
+
+
+def test_hybrid_zero_budget_zero_llm():
+    """예산 0(chunk_pct=0) → LLM 호출 0 — 순수 규칙 동치(가드레일 하한)."""
+    import asyncio
+    from ontokit.extractors.relation_hybrid import (
+        HybridRelationExtractor, BudgetGuard)
+
+    called = {"n": 0}
+
+    class _LLM:
+        def generate(self, prompt, *, system="", timeout=None, max_tokens=None):
+            called["n"] += 1
+            return '{"triples":[]}'
+
+    chunks = [{"chunk_id": "c%d" % i, "chunk_text": "나열 %d." % i} for i in range(5)]
+    budget = BudgetGuard(max_chunk_pct=0.0, max_usd=None)
+    h = HybridRelationExtractor(llm=_LLM(), budget=budget, topup_when="empty")
+    _, report = asyncio.run(h.extract_corpus(chunks))
+    assert called["n"] == 0, "예산 0인데 LLM 호출됨"
+    assert report["llm_called"] == 0
+
+
 def test_dedup_rename_map():
     """결정적 dedup — 형태소 키 동일한 클래스 병합 맵(#6 커버)."""
     try:
@@ -761,7 +878,8 @@ def test_hybrid_chunk_pct_hard_cap():
 
 
 def test_hybrid_usd_hard_cap():
-    """달러 상한이 하드 상한 — 사전 판정으로 초과 방지."""
+    """달러 상한이 하드 상한 — 보수적 사전판정+안전마진으로 실측이 절대 초과 안 함
+    (0713 R2: 실빌드 44% 초과 발견 → 하드화). 핵심 불변식: spent_usd ≤ max_usd."""
     try:
         import kiwipiepy  # noqa
     except ImportError:
@@ -770,15 +888,16 @@ def test_hybrid_usd_hard_cap():
     from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
     llm = _fake_llm()
     chunks = [{"chunk_id": f"c{i}", "chunk_text": "가"*3000 + " 조사없는파편"} for i in range(20)]
-    # 청크당 사전판정 ~$0.011(3000자in + max_output_chars 1200자out). cap $0.025면 2회.
-    b = BudgetGuard(max_chunk_pct=None, max_usd=0.025,
+    # cap 을 여러 콜분($0.30)으로 넉넉히 — 하드 상한이 실측을 절대 안 넘기는지 확인.
+    b = BudgetGuard(max_chunk_pct=None, max_usd=0.30,
                     price_per_1k_input=0.005, price_per_1k_output=0.015,
                     max_output_chars=1200)
     h = HybridRelationExtractor(llm=llm, budget=b)
     rels, rep = asyncio.run(h.extract_corpus(chunks))
-    # 고정 소형 출력(fake)이라 실제 회계는 사전판정보다 작음 → 상한 내
-    assert rep["spent_usd"] <= 0.025, f"상한 초과: {rep['spent_usd']}"
-    assert 2 <= llm.calls <= 3
+    assert rep["spent_usd"] <= 0.30, f"하드 상한 초과: {rep['spent_usd']}"
+    assert rep["llm_called"] >= 1, "예산 넉넉한데 호출 0"
+    # 안전마진 예약으로 상한 근처에서 멈춤 — 마지막 콜이 상한을 넘기지 않음
+    assert rep["spent_usd"] + b._worst_call_cost() > 0.30 or rep["budget_skipped"] == 0
 
 
 def test_hybrid_topup_recovers_relation():
@@ -798,34 +917,27 @@ def test_hybrid_topup_recovers_relation():
     assert rep["llm_triples"] == 1
 
 
-def test_hybrid_usd_cap_overshoot_bounded():
-    """달러 상한: 문자근사+대형출력이면 최대 1호출 초과, 그 후 유한 정지(R2 MED)."""
+def test_hybrid_usd_cap_tight_zero_calls():
+    """상한이 1콜 최악비용보다 작으면 안전마진 예약으로 호출 0 — 절대 초과 안 함
+    (R2 하드화: 무리한 1콜로 상한 넘기느니 규칙 폴백). max_tokens 물리제한과 병행."""
     try:
         import kiwipiepy  # noqa
     except ImportError:
         import pytest; pytest.skip("kiwipiepy 미설치")
     import asyncio
     from ontokit.extractors.relation_hybrid import HybridRelationExtractor, BudgetGuard
-    # LLM이 대형 출력(200관계≈6000자) 반환 — 사전판정(max_output_chars=1200) 초과
     big_reply = '{"triples":[' + ",".join(
         '{"s":"금융위원회","p":"감독%d","o":"은행"}' % i for i in range(200)) + ']}'
-    llm = _fake_llm(big_reply)
     chunks = [{"chunk_id": f"c{i}", "chunk_text": "조사없는 파편 조각들"} for i in range(20)]
-    # cap을 5호출분 정도로 잡아도, 대형출력이면 1호출 후 정지해야(유한 초과)
+    # 대형출력 + 매우 타이트한 상한($0.02 < 1콜 최악비용) → 호출 0, 실측 $0.
+    def usage_ex(_res):
+        return {"input_tokens": 20, "output_tokens": 2000}   # 실제로도 큼
     b = BudgetGuard(max_chunk_pct=None, max_usd=0.02,
                     price_per_1k_input=0.005, price_per_1k_output=0.015,
                     max_output_chars=1200)
-    h = HybridRelationExtractor(llm=llm, budget=b)
+    h = HybridRelationExtractor(llm=_fake_llm(big_reply), budget=b,
+                                usage_extractor=usage_ex)
     _, rep = asyncio.run(h.extract_corpus(chunks))
-    # 초과는 유한: 사후 회계가 상한 넘겨도 이후 전량 거부 → 무한증가 없음
-    assert rep["llm_called"] <= 3, f"대형출력인데 {rep['llm_called']}회 (유한 정지 실패)"
-    # usage 콜백도 사전판정은 근사라 첫 호출 초과는 못 막음 — '유한 정지'만 보장.
-    # (진짜 하드는 LLM max_tokens 물리제한 필요 — docstring 공시)
-    def usage_ex(_res):
-        return {"input_tokens": 20, "output_tokens": 2000}   # ≈$0.03/호출
-    llm2 = _fake_llm(big_reply)
-    b2 = BudgetGuard(max_chunk_pct=None, max_usd=0.02,
-                     price_per_1k_input=0.005, price_per_1k_output=0.015)
-    h2 = HybridRelationExtractor(llm=llm2, budget=b2, usage_extractor=usage_ex)
-    _, rep2 = asyncio.run(h2.extract_corpus(chunks))
-    assert rep2["llm_called"] == 1, "첫 초과 후 유한 정지 실패"  # 1호출로 상한 넘고 정지
+    assert rep["spent_usd"] <= 0.02, f"타이트 상한 초과: {rep['spent_usd']}"
+    # 1콜 최악비용($worst)이 상한보다 크면 마진 예약으로 0콜(안전 폴백)
+    assert rep["llm_called"] == 0, f"타이트 상한인데 {rep['llm_called']}콜(초과위험)"

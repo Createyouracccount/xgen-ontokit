@@ -67,6 +67,14 @@ class BudgetGuard:
     price_per_1k_input: float = 0.005        # 입력 요금(달러/1K 토큰) — 모델별 덮어쓰기
     price_per_1k_output: float = 0.015
     max_output_chars: int = 1200             # 사전판정 출력 가정 = LLM max_tokens 와 맞출 것
+    # ── 달러캡 하드화(0713 R2 실빌드에서 44% 초과 발견 → 보수적 사전판정) ──
+    # 실측 결과: char/3 근사가 한국어 입력 토큰을 과소계상 + 시스템프롬프트 오버헤드
+    # 누락으로 can_call 이 실제보다 싸게 봐 상한을 넘겼다. 사전판정은 '절대 과소추정
+    # 안 함' 원칙으로: (1) 보수적 토큰환산(한국어 ≈2자/토큰), (2) 고정 오버헤드 가산,
+    # (3) 안전마진(1콜 최악비용) 예약. 회계(record)는 실 usage 우선.
+    est_chars_per_token: float = 2.0         # 사전판정용 보수적 환산(과소추정 방지)
+    per_call_overhead_tokens: int = 400      # 시스템프롬프트+프리픽스 고정 오버헤드
+    safety_margin_calls: float = 1.0         # 상한 근처에서 예약할 '최악 1콜' 배수
 
     # 실시간 회계(내부 상태)
     spent_usd: float = 0.0
@@ -82,16 +90,31 @@ class BudgetGuard:
 
     def can_call(self, est_input_chars: int,
                  est_output_chars: Optional[int] = None) -> bool:
-        """이 청크에 LLM 을 호출해도 상한 내인가(사전 판정). 출력 가정은
-        max_output_chars(=LLM max_tokens 상한과 일치시킬 값)."""
+        """이 청크에 LLM 을 호출해도 상한 내인가(사전 판정, 보수적).
+
+        '절대 과소추정 안 함' — 입력을 보수적 토큰환산(est_chars_per_token, 한국어
+        ≈2자/토큰) + 고정 오버헤드로 크게 잡고, 상한 근처엔 안전마진(최악 1콜)을
+        예약한다. 이래야 실측 비용이 max_usd 를 넘지 않는다(R2 44% 초과 수정)."""
         if self._budget_chunks is not None and self.called >= self._budget_chunks:
             return False
         if self.max_usd is not None:
             out = est_output_chars if est_output_chars is not None else self.max_output_chars
-            est = self._cost(est_input_chars, out)
-            if self.spent_usd + est > self.max_usd:
+            est = self._est_cost(est_input_chars, out)
+            margin = self.safety_margin_calls * self._worst_call_cost()
+            if self.spent_usd + est + margin > self.max_usd:
                 return False
         return True
+
+    def _est_cost(self, in_chars: int, out_chars: int) -> float:
+        """사전판정용 보수적 비용 — 과소추정 방지(작은 환산 + 오버헤드 가산)."""
+        in_tok = (in_chars / self.est_chars_per_token / 1000.0
+                  + self.per_call_overhead_tokens / 1000.0)
+        out_tok = out_chars / self.est_chars_per_token / 1000.0
+        return in_tok * self.price_per_1k_input + out_tok * self.price_per_1k_output
+
+    def _worst_call_cost(self) -> float:
+        """안전마진용 — 최악(입력 상한 6000자 + 출력 상한) 1콜 비용."""
+        return self._est_cost(6000, self.max_output_chars)
 
     def _cost(self, in_chars: int, out_chars: int) -> float:
         in_tok = in_chars / _CHARS_PER_TOKEN / 1000.0
@@ -223,8 +246,11 @@ class HybridRelationExtractor:
 
         # 2패스: 후보를 예산 내에서만 LLM top-up. LLM 없으면 스킵(순수 규칙).
         if self.llm is not None:
-            # 긴 청크(관계 밀도 기대 큼) 우선 — 예산이 빠듯할 때 회수 극대화.
-            candidates.sort(key=lambda cr: len(cr[0].get("chunk_text", "")), reverse=True)
+            # 짧은 청크 우선(관계당 비용 최소 = relations-per-dollar 극대화).
+            # R2 실빌드 교훈: 긴 청크 우선은 표·헤더 등 저수율 청크에 예산을 먼저
+            # 태워 상한 소진 후 생산적 짧은 청크(검사로그 등)에 도달 못 함(85콜/$0.43
+            # → 관계 0). 짧은 청크부터면 예산 소진 시에도 우아하게 저하된다.
+            candidates.sort(key=lambda cr: len(cr[0].get("chunk_text", "")))
             for ch, rule_rels in candidates:
                 text = ch.get("chunk_text", "")
                 cid = ch.get("chunk_id")
@@ -258,8 +284,18 @@ class HybridRelationExtractor:
 
     async def _llm_call(self, text: str) -> tuple[list[dict], Optional[dict]]:
         prompt = f"조문:\n{text[:6000]}"
+        # 출력 물리 상한 — max_usd 를 하드 상한으로 만드는 핵심(BudgetGuard docstring).
+        # can_call 은 출력을 max_output_chars 로 가정하는데, 실제 출력이 이를 넘으면
+        # 마지막 1호출이 상한을 넘는다. LLM max_tokens 를 이 가정과 맞춰 물리 제한하면
+        # 초과가 원천 차단된다. 토큰≈문자/3(한국어 근사, _CHARS_PER_TOKEN).
+        max_tokens = max(1, int(self.budget.max_output_chars / _CHARS_PER_TOKEN))
         try:
-            res = self.llm.generate(prompt, system=self.llm_system, timeout=60)
+            try:
+                res = self.llm.generate(prompt, system=self.llm_system,
+                                        timeout=60, max_tokens=max_tokens)
+            except TypeError:
+                # max_tokens 미지원 어댑터 — 폴백(이 경우 달러캡은 소프트, docstring 경고).
+                res = self.llm.generate(prompt, system=self.llm_system, timeout=60)
             if isinstance(res, Awaitable):
                 res = await res
         except Exception:
