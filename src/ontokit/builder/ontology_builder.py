@@ -21,10 +21,14 @@ class OntologyBuilder:
 
     def __init__(self, extractor=None, dedup=None, owl_generator=None, *, kiwi=None,
                  domain_words: Optional[list[str]] = None, ner=None,
-                 en_nouns=None, en_ner=None, enable_dedup: bool = True):
+                 en_nouns=None, en_ner=None, enable_dedup: bool = True,
+                 relation_extractor=None):
+        # relation_extractor 주입(예: hybrid top-up) — 자동생성 추출기에 전달.
+        # 명시 extractor 가 있으면 그것 우선(relation_extractor 무시).
         self.extractor = extractor or DeterministicKoreanExtractor(
             kiwi=kiwi, ner=ner, domain_words=domain_words,
-            en_nouns=en_nouns, en_ner=en_ner)
+            en_nouns=en_nouns, en_ner=en_ner,
+            relation_extractor=relation_extractor)
         self.dedup = dedup or (DeterministicDedup(kiwi=kiwi) if enable_dedup else None)
         self.owl_generator = owl_generator or DeterministicOWLGenerator()
 

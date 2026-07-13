@@ -56,6 +56,11 @@ class DeterministicKoreanExtractor:
             else:
                 from .relation_ko import KoreanRelationExtractor
                 self.relations = KoreanRelationExtractor(kiwi=self.nouns.kiwi)
+        # 코퍼스레벨 관계추출기(extract_corpus, 예: hybrid) 판별 — 청크별 extract 대신
+        # 루프 뒤 1회 호출(예산 가드레일이 코퍼스 전체 기준으로 작동).
+        self._rel_is_corpus = (self.relations is not None
+                               and hasattr(self.relations, "extract_corpus")
+                               and not hasattr(self.relations, "extract"))
         # 동시 빌드 2개가 같은 extractor 인스턴스(factory 공유)를 서로 다른
         # to_thread 워커에서 돌릴 때 Kiwi 동시 호출을 직렬화(스레드 안전성 미보장
         # 방어, 0711 적대리뷰 HIGH). NER 는 자체 락 보유 — 이 락은 형태소·관계 커버.
@@ -149,6 +154,7 @@ class DeterministicKoreanExtractor:
         # 언어별로 모아 배치 forward(430ms/청크)로 바꾼다. (doc_name, text, sc) 튜플.
         ko_ner_buf: list[tuple[str, str, list]] = []
         en_ner_buf: list[tuple[str, str, list]] = []
+        rel_chunk_buf: list[dict] = []  # 코퍼스레벨 관계추출(hybrid)용 청크 수집
 
         for doc_name, chunks in documents.items():
             for ch in chunks:
@@ -185,10 +191,16 @@ class DeterministicKoreanExtractor:
                 #   무관) — en-지배 혼합청크의 한국어 문장 관계가 통째 소실되던 것 수정
                 #   (0711 리뷰: 클래스는 이중추출로 살리면서 관계만 버리는 비일관).
                 #   조사(JKS/JKO)는 한글 문장에만 나타나므로 영어 문장엔 원리적으로 무해.
+                # 관계 추출기가 코퍼스레벨(extract_corpus, 예: hybrid top-up)이면
+                # 청크를 모아 루프 뒤 1회 호출(예산 가드레일이 코퍼스 전체 기준으로
+                # 작동해야 LLM-free 가치 보존). 청크별 extract 면 여기서 즉시.
                 if self.relations is not None and _HANGUL.search(text):
-                    rels = self.relations.extract(text, source_chunks=sc)
-                    if rels:
-                        all_relations.extend(rels)
+                    if self._rel_is_corpus:
+                        rel_chunk_buf.append({"chunk_id": cid, "chunk_text": text})
+                    else:
+                        rels = self.relations.extract(text, source_chunks=sc)
+                        if rels:
+                            all_relations.extend(rels)
                 # ④' Hearst 정의문 계층(opt-in) — 접미공유가 못 잡는 이질 상위어
                 #   ('"신용공여"란 …거래를 말한다' → 신용공여⊂거래). 따옴표 정의문 한정.
                 if self.enable_hearst and _HANGUL.search(text):
@@ -201,6 +213,20 @@ class DeterministicKoreanExtractor:
         # ② NER → 인스턴스 엔티티 — 언어별 배치 forward 1회.
         self._run_ner_batched(self.ner, ko_ner_buf, all_entities)
         self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)
+
+        # ③' 코퍼스레벨 관계추출(hybrid top-up) — 수집한 한국어 청크 1회 처리.
+        #   예산 가드레일(청크% ∨ 달러)이 코퍼스 전체 기준으로 작동해 LLM-free 가치
+        #   보존. extract_corpus 는 async 라 이 sync 본문에서 새 이벤트루프로 실행
+        #   (이 본문 자체가 pipeline 의 to_thread 워커라 실행 루프 없음 — asyncio.run 안전).
+        if self._rel_is_corpus and rel_chunk_buf:
+            try:
+                import asyncio as _asyncio
+                rels, _rep = _asyncio.run(
+                    self.relations.extract_corpus(rel_chunk_buf))
+                if rels:
+                    all_relations.extend(rels)
+            except Exception:
+                pass  # hybrid 실패는 비치명 — 규칙 결과(있으면) 유지, 관계 없이 진행
 
         # 루프 밖 1회 리스트화 — merged 스키마 구성.
         merged = {

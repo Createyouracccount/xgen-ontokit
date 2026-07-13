@@ -132,6 +132,34 @@ def test_relation_carryover_tag():
     assert tris[1].get("inferred_subject")        # 캐리오버(생략주어)
 
 
+def test_corpus_level_relation_integration():
+    """코퍼스레벨 관계추출기(extract_corpus, 예: hybrid) 주입 통합 (0713).
+
+    deterministic_ko 가 청크별 extract 대신 루프 뒤 extract_corpus 1회 호출하는지.
+    스텁 코퍼스 추출기로 검증 — 규칙 결과 + 스텁이 더한 트리플 모두 나와야."""
+    import asyncio
+    try:
+        from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+    except ImportError:
+        pytest.skip("의존성 미설치")
+
+    class _CorpusRel:  # extract_corpus 만(extract 없음) = 코퍼스레벨로 판별돼야
+        async def extract_corpus(self, chunks):
+            return ([{"subject": "코퍼스", "predicate": "처리", "object": "일괄",
+                      "predicate_type": "ObjectProperty",
+                      "source_chunks": [chunks[0]["chunk_id"]] if chunks else []}],
+                    {"total_chunks": len(chunks)})
+
+    ext = DeterministicKoreanExtractor(relation_extractor=_CorpusRel())
+    assert ext._rel_is_corpus is True   # extract_corpus 만 → 코퍼스레벨 판별
+    docs = {"d": [{"chunk_id": "c1", "chunk_text": "금융위원회는 은행을 감독한다."}]}
+    _, _, rels, _ = asyncio.run(ext.extract(docs))
+    # 주입 추출기가 관계 소스 — 청크별 rule.extract 대신 extract_corpus 1회.
+    assert any(r["predicate"] == "처리" for r in rels)
+    # 한국어 청크가 버퍼로 수집돼 extract_corpus 에 전달됐는지(코퍼스 1회 경로)
+    assert rels[0]["source_chunks"] == ["c1"]
+
+
 def test_dedup_rename_map():
     """결정적 dedup — 형태소 키 동일한 클래스 병합 맵(#6 커버)."""
     try:
