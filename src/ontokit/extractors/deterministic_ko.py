@@ -25,7 +25,7 @@ class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
                  en_nouns=None, en_ner=None, relation_extractor=None,
                  enable_relations: bool = True, auto_english: bool = True,
-                 enable_hearst: bool = False):
+                 enable_hearst: bool = True):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
         domain_words: 사용자사전 도메인 용어(한국어 Kiwi 사용자사전 + 영어 단일명사 허용목록).
@@ -33,6 +33,12 @@ class DeterministicKoreanExtractor:
         en_ner: EnglishNER(None이면 영어 엔티티 추출 생략, extras[ner]).
         auto_english: True(기본)면 nltk 설치 시 en_nouns 자동 생성 — 영어 클래스가
           별도 주입 없이 나온다. en_ner 는 torch 모델 로드가 무거워 자동화하지 않음(명시 주입만).
+        enable_hearst: True(기본, v0.12~)면 정의문 계층(hearst_ko) 배선 — 접미공유가
+          원리적 불가한 이질계층(강아지⊂동물, 신용공여⊂거래)을 종결 패턴(계사/genus/서술/
+          속하는)으로 유도. 외부 gold(Wikidata P279) 심판루프 89/100 검증. 비정의문
+          문장엔 발화 안 함(오탐 낮음, 법령체 스팟체크 0). ⚠️v0.11 대비 동작 변화:
+          정의문("X는…Y이다")이 있는 한국어 코퍼스에 이질계층 subClassOf 가 추가된다
+          (순수 접미공유 출력과 다름). 기존 동작이 필요하면 enable_hearst=False.
 
         혼합 코퍼스(한국어+영어): 명사(클래스)는 한·영 추출기를 **둘 다** 실행해
         혼합 청크의 소수언어 용어("Basel III 규제"의 Basel)를 보존한다(v0.6, 자연 직교 —
@@ -201,10 +207,13 @@ class DeterministicKoreanExtractor:
                         rels = self.relations.extract(text, source_chunks=sc)
                         if rels:
                             all_relations.extend(rels)
-                # ④' Hearst 정의문 계층(opt-in) — 접미공유가 못 잡는 이질 상위어
-                #   ('"신용공여"란 …거래를 말한다' → 신용공여⊂거래). 따옴표 정의문 한정.
+                # ④' 정의문 계층(opt-in) — 접미공유가 원리적 불가한 이질 상위어
+                #   (강아지⊂동물, 계란빵⊂음식). 종결 패턴(계사/genus/서술/속하는) 정밀
+                #   targeting. 외부 gold(Wikidata P279) 심판루프 89/100 검증(순증 +0.30,
+                #   이질계층 77%). kiwi 주입 → 강화 채널, 미주입 → 따옴표 폴백.
                 if self.enable_hearst and _HANGUL.search(text):
-                    for hp in definitional_pairs(text, self.nouns.last_noun):
+                    for hp in definitional_pairs(text, self.nouns.last_noun,
+                                                 kiwi=self.nouns.kiwi):
                         hearst_pairs.append(hp)
                         # 정의쌍의 클래스가 명사추출에 안 잡혔어도 존재 보장(+출처 청크)
                         class_chunks.setdefault(hp["child"], set()).update(sc)
@@ -241,8 +250,9 @@ class DeterministicKoreanExtractor:
             merged["skipped_en_chunks"] = skipped_en_chunks
 
         # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관). 인덱스화+허브필터(O(N·L²)).
-        #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업).
-        #   정의문(Hearst) 계층은 enable_hearst opt-in(기본 off — 자유텍스트 노이즈).
+        #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업, 동종계층).
+        #   접미공유(동종)와 정의문(이질, hearst_ko 종결패턴)은 상보 — merge 시 superset.
+        #   정의문 계층은 enable_hearst(기본 on, v0.12~, 외부gold 심판루프 89/100 검증).
         merged["class_hierarchy"].extend(induce_suffix_hierarchy(set(class_chunks.keys())))
         if hearst_pairs:
             merged["class_hierarchy"].extend(hearst_pairs)

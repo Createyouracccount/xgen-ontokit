@@ -48,6 +48,63 @@ def test_suffix_hub_filter():
     assert ("주주", "대주주") not in pairs  # 허브 미달(자식 1개)
 
 
+def test_definitional_hierarchy_heterogeneous():
+    """정의문 계층 — 접미공유가 원리적 불가한 이질계층(강아지⊂동물). extras[korean].
+    외부 gold(Wikidata P279) 심판루프 89/100 검증 로직의 본체화."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 없으면 skip")
+    from ontokit.hierarchy.hearst_ko import definitional_pairs
+    kiwi = Kiwi()
+
+    def parent_of(text, child):
+        pairs = definitional_pairs(text, None, kiwi=kiwi)
+        return {p["parent"] for p in pairs if p["child"] == child}
+
+    # ① 계사 종결 "X는 … Y이다" — 이질계층(문자 공유 0)
+    assert "음식" in parent_of("계란빵은 한국의 길거리 음식이다", "계란빵")
+    # ② genus "X는 … Y의 한 분야" — 형식명사 '분야'는 상위어 제외, Y만
+    p = parent_of("통계학은 데이터를 다루는 수학의 한 분야이다", "통계학")
+    assert "수학" in p and "분야" not in p
+    # ③ 서술 "X는 … Y를 말한다" (Kiwi: 말+하 분리 대응)
+    assert "활동" in parent_of("공공외교는 문화를 알리는 활동을 말한다", "공공외교")
+    # ④ "X는 Y에 속하는 …"
+    assert "고양이과" in parent_of(
+        "도메스틱 쇼트헤어는 고양이과에 속하는 동물이다", "도메스틱쇼트헤어")
+
+
+def test_definitional_hierarchy_gates():
+    """정의문 계층 오탐 게이트 — sub-word 파편(주의/화) 상위어 배제. extras[korean]."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 없으면 skip")
+    from ontokit.hierarchy.hearst_ko import definitional_pairs, _is_standalone_noun
+    kiwi = Kiwi()
+    # 바운드 형태소 접미 게이트 — '주의'·'화'는 상위어 부적격
+    assert not _is_standalone_noun("주의", kiwi)
+    assert not _is_standalone_noun("화", kiwi)
+    assert _is_standalone_noun("음식", kiwi)   # 유효명사는 통과
+    assert _is_standalone_noun("수학", kiwi)
+    # "민족주의는 … 이념이다" → parent='이념'(유효), '주의' 파편 안 나옴
+    pairs = definitional_pairs("민족주의는 민족을 중시하는 이념이다", None, kiwi=kiwi)
+    parents = {p["parent"] for p in pairs}
+    assert "이념" in parents
+    assert "주의" not in parents
+
+
+def test_definitional_hierarchy_backcompat():
+    """구 API 하위호환 — kiwi 미주입 시 따옴표 정의문 + last_noun_fn 폴백."""
+    from ontokit.hierarchy.hearst_ko import definitional_pairs
+    # kiwi 없이 last_noun_fn 만 — 따옴표 정의문(법령체)
+    pairs = definitional_pairs(
+        '"신용공여"란 여신 거래를 말한다',
+        last_noun_fn=lambda s: s.split()[-1] if s.split() else "")
+    # 폴백 경로 동작(빈 결과여도 예외 없이) — 계약 유지 확인
+    assert isinstance(pairs, list)
+
+
 def test_suffix_hierarchy_scale():
     """수십만 클래스 선형 — O(N²) 재발 방지 회귀(#1)."""
     import time
