@@ -1329,3 +1329,20 @@ def test_relation_nummix_gate():
     # 747은 인자로 방출 금지 — 기종만
     assert tris and tris[0]["object"] == "기종"
     assert all("747" not in t["object"] and "747" not in t["subject"] for t in tris)
+
+
+def test_english_ner_misc_and_junk_gates():
+    """영어 NER 방출 게이트 — MISC('기타' 쓰레기통) 미방출(기본), 숫자뿐 표면 컷,
+    PER/LOC/ORG 는 공유 클래스(인물/지역/기관)로 유지(0714 R2 심판 조건부 채택)."""
+    from ontokit.ner.english import EnglishNER
+    fake = [
+        {"word": "Apple", "entity_group": "MISC", "score": 0.99},
+        {"word": "2004", "entity_group": "ORG", "score": 0.95},
+        {"word": "Obama", "entity_group": "PER", "score": 0.99},
+        {"word": "London", "entity_group": "LOC", "score": 0.98},
+        {"word": "UN", "entity_group": "ORG", "score": 0.97},
+    ]
+    ner = EnglishNER(pipeline=lambda *a, **k: None)  # _ensure 우회용 더미
+    out = ner._to_dicts(fake, ["c1"])
+    got = {(d["entity"], d["class"]) for d in out}
+    assert got == {("Obama", "인물"), ("London", "지역"), ("UN", "기관")}, got

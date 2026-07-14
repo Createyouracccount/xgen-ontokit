@@ -6,6 +6,8 @@ dslim/bert-base-NER: MIT, CoNLL-2003 F1~0.91, ~110M. PER/ORG/LOC/MISC.
 """
 from __future__ import annotations
 import logging
+import os
+import re
 import threading
 from typing import Optional
 
@@ -18,6 +20,27 @@ logger = logging.getLogger(__name__)
 # 인물 질의 시 영어 문서 인스턴스가 통째 누락된다(0711 적대리뷰 MED —
 # kg_builder 가 entity "class" 문자열 그대로 클래스 URI 생성). 닫힌 집합(4개).
 CONLL_LABEL_KO = {"PER": "인물", "ORG": "기관", "LOC": "지역", "MISC": "기타"}
+
+# MISC 방출 차단(기본) — CoNLL MISC 는 의미 클래스가 아니라 "나머지" 쓰레기통이라
+# '기타' 클래스로 직행하면 혼합 코퍼스에서 검색 불가 고아 인스턴스가 수만 건
+# 쌓인다(mixed20k 실측 20,797건 = 인스턴스 4위 ~14%, 전량 라틴 토큰, SVO·계층
+# 참여 구조적 0). PER/LOC/ORG 는 인물/지역/기관 공유 클래스로 유지 — 영어
+# 집계·열거 질의는 생존(0714 적대심판 조건부 채택; "ko 청크 혼입 개체 회귀"
+# 우려는 en-지배 청크만 이 경로라 허수 판정). dict 에서 키만 빼면 raw "MISC"
+# 클래스로 역방출되는 함정(심판 적발)이 있어 명시 필터로 구현.
+# env ONTOKIT_NER_EMIT_MISC=1 로 구동작 복원 가능.
+_EMIT_MISC = os.environ.get("ONTOKIT_NER_EMIT_MISC", "") == "1"
+
+# 영어 NER 최소 신뢰도 — koelectra 의 ONTOKIT_NER_MIN_SCORE(0.40)는 한국어 실측
+# 보정값이라 복붙 금지(심판 조건: dslim/bert-base-NER 스코어 분포는 별개). env 를
+# ONTOKIT_NER_MIN_SCORE_EN 으로 분리, 기본 0.0(=off) — en 표본 히스토그램으로
+# 보정하기 전까지 정직하게 무보정.
+DEFAULT_MIN_SCORE_EN = float(os.environ.get("ONTOKIT_NER_MIN_SCORE_EN", "0") or 0)
+
+# 문자(letter) 없는 표면 컷 — '12'·'2004'·'65' 류 아티팩트가 인스턴스로 방출되던
+# 무게이트 구멍(mixed20k 실측, koelectra 에만 있던 게이트의 en 대칭 일부).
+# 닫힌 문자클래스 규칙 — 임계 보정이 필요 없어 즉시 안전.
+_HAS_LETTER = re.compile(r"[^\W\d_]")
 
 
 class EnglishNER:
@@ -42,10 +65,18 @@ class EnglishNER:
         out = []
         for e in ents or []:
             w = (e.get("word", "") or "").replace("##", "").strip()
-            if len(w) >= 2:
-                g = e.get("entity_group", "ENTITY")
-                out.append({"entity": w, "class": CONLL_LABEL_KO.get(g, g),
-                            "type": "INSTANCE", "source_chunks": source_chunks})
+            if len(w) < 2:
+                continue
+            g = e.get("entity_group", "ENTITY")
+            if g == "MISC" and not _EMIT_MISC:      # 쓰레기통 라벨 미방출(파일 상단 주석)
+                continue
+            if not _HAS_LETTER.search(w):           # 숫자·기호뿐인 표면 컷
+                continue
+            score = float(e.get("score", 1.0) or 1.0)
+            if score < DEFAULT_MIN_SCORE_EN:        # 기본 0.0=off, 보정 후 env 로 활성
+                continue
+            out.append({"entity": w, "class": CONLL_LABEL_KO.get(g, g),
+                        "type": "INSTANCE", "source_chunks": source_chunks})
         return out
 
     def entities(self, text: str, *, source_chunks: list[str],
