@@ -407,6 +407,51 @@ def test_dedup_rename_map():
     assert isinstance(rename, dict)  # 실패 없이 맵 반환
 
 
+def test_synonym_dict_fallback_no_env(monkeypatch):
+    """사전 dedup 채널 불변식 ① — env 미지정이면 사전 채널 미생성(형태소만)."""
+    try:
+        from ontokit.dedup.deterministic import DeterministicDedup
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    monkeypatch.delenv("ONTOKIT_SYNONYM_DICT", raising=False)
+    d = DeterministicDedup()
+    assert d._syn is None
+
+
+def test_synonym_dict_fallback_bad_path(monkeypatch):
+    """사전 dedup 채널 불변식 ② — env 경로 오류면 형태소 폴백(예외 없이)."""
+    try:
+        from ontokit.dedup.deterministic import DeterministicDedup
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    import logging
+    logging.disable(logging.CRITICAL)
+    monkeypatch.setenv("ONTOKIT_SYNONYM_DICT", "/nonexistent/synonym.tsv")
+    d = DeterministicDedup()
+    assert d._syn is None  # 로드 실패 → 형태소만(불변식)
+    logging.disable(logging.NOTSET)
+
+
+def test_synonym_dict_merge(tmp_path, monkeypatch):
+    """사전 채널 — 형태소키 다른 동의어(전자상거래=이커머스) 병합. TSV 스냅샷."""
+    try:
+        from ontokit.dedup.deterministic import DeterministicDedup
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    # 최소 스냅샷: 두 표기가 같은 대표(R1) 공유 = 동의어
+    tsv = tmp_path / "syn.tsv"
+    tsv.write_text("전자상거래\tR1\n이커머스\tR1\n무관어\tR2\n", encoding="utf-8")
+    monkeypatch.setenv("ONTOKIT_SYNONYM_DICT", str(tsv))
+    d = DeterministicDedup()
+    assert d._syn is not None and d._syn.size() == 3
+    concepts = {"classes": [{"name": "전자상거래"}, {"name": "이커머스"}, {"name": "무관어"}],
+                "object_properties": []}
+    rename = d.compute_rename_map(concepts, {})
+    # 전자상거래/이커머스 중 하나가 다른 하나로 병합, 무관어는 별개
+    assert ("이커머스" in rename or "전자상거래" in rename)
+    assert "무관어" not in rename
+
+
 def test_suffix_hierarchy_english():
     """영어 계층 — 공백형은 단어 접미·대소문자 무시, 단어경계 보호(v0.6 #1). 의존성 0."""
     from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy

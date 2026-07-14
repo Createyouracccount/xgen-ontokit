@@ -19,14 +19,37 @@ _NOISE_EN = re.compile(
 class DeterministicDedup:
     """Kiwi 형태소 정규화 키로 동의어 병합. kiwi 인스턴스 주입(없으면 생성)."""
 
-    def __init__(self, kiwi=None):
+    def __init__(self, kiwi=None, synonym_dict=None):
+        """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
+        synonym_dict: SynonymDictDedup 인스턴스(선택). None 이면 env
+          ONTOKIT_SYNONYM_DICT 지정 시 자동 로드 — 우리말샘 비슷한말로 의미변이
+          (전자상거래=이커머스) 추가 병합. 미지정·미설치면 형태소 정규화만(불변).
+          ⚠️ 사전은 고정밀 확정 동의어 병합(P 1.000)이지 광범위 recall 아님
+          (ER 심판 5R: 임베딩 주제근접 미분리·전통사전 현대어 미수록). 신중한 opt-in."""
         if kiwi is None:
             from kiwipiepy import Kiwi  # extras[korean]
             kiwi = Kiwi()
         self._kiwi = kiwi
+        self._syn = synonym_dict or self._auto_synonym_dict()
         # 동시 빌드 2개가 같은 dedup 인스턴스를 서로 다른 to_thread 워커에서 쓸 때
         # Kiwi.analyze 동시 호출을 직렬화(스레드 안전성 미보장 방어). 0711 적대리뷰 지적.
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _auto_synonym_dict():
+        """env ONTOKIT_SYNONYM_DICT 지정 시 사전 채널 자동 로드, 아니면 None(형태소만).
+        '설정 안 하면 안 켜진다' 불변식 — 로드 실패 시에도 형태소 폴백."""
+        import logging
+        import os
+        if not os.getenv("ONTOKIT_SYNONYM_DICT"):
+            return None
+        try:
+            from .synonym_dict import SynonymDictDedup
+            return SynonymDictDedup()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "동의어 사전 로드 실패 — 형태소 정규화만 사용", exc_info=True)
+            return None
 
     def _noun_key(self, name: str, *, strip_en_noise: bool = False) -> str:
         cleaned = _CLEAN.sub('', (name or '').strip())
@@ -80,6 +103,13 @@ class DeterministicDedup:
             for k, v in self._rename_by_key(prop_names, strip_en_noise=True).items():
                 if k not in rename and rename.get(v) != k:
                     rename[k] = v
+            # 사전 채널(선택): 형태소키가 달라도 우리말샘 동의어면 추가 병합
+            #   (전자상거래=이커머스). 형태소 맵과 모순되는 항목은 버린다(위와 동형).
+            if self._syn is not None:
+                syn_targets = cls_names + inst_names
+                for k, v in self._syn.rename_by_synonym(syn_targets).items():
+                    if k not in rename and rename.get(v) != k:
+                        rename[k] = v
         # 체인 평탄화 + self-map 제거. visited 가드 — 위 필터가 놓친 어떤 형태의
         # 사이클(3항 이상 순환 등)도 종료를 보장(재방문 시 그 지점에서 멈춤).
         flat = {}

@@ -11,6 +11,7 @@ korean = ["kiwipiepy>=0.18"]            # 형태소·복합명사(한국어)
 english = ["nltk>=3.8"]                  # 영어 명사구 추출(POS)
 ner = ["transformers>=4.40", "torch>=2.0"]  # KoELECTRA(ko)·dslim BERT(en) NER
 relation-encoder = ["transformers>=4.40", "torch>=2.0"]  # KLUE-RE 파인튜닝 관계 인코더(ko). 미설치 시 규칙 폴백
+synonym-embed = ["sentence-transformers>=3.0"]  # ER 의미변이 임베딩 보조(KURE 등). 사전 채널은 의존성 0(TSV)
 discover = ["soynlp>=0.0.5"]            # 도메인 신조어 자동 발굴
 owl = ["rdflib>=6.0"]                   # 결정적 OWL/TTL 생성
 fuseki = ["httpx>=0.27"]               # GraphStore 백엔드
