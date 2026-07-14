@@ -68,6 +68,30 @@ def test_suffix_morpheme_gate():
     assert ("보험업", "손해보험업") in pairs
 
 
+def test_suffix_proper_noun_and_dup_gate():
+    """상위어 NNP(고유명사) 게이트 + 중복접합 게이트 — 접합 클래스 오염 차단.
+    mixed20k 실측: '대한민국'(NNP)이 문화재대한민국·고등학교대한민국 15개의 허브가 돼
+    그래프 오염 → NNP head 허브 거부. '최양업최양업'(Kiwi 오분절로 NNG)은 child==parent*2
+    중복 게이트로 컷. 진짜 복합어 상위어(보험업/전문학교=NNG)는 회귀 0(심판 검증)."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    kiwi = Kiwi()
+    names = {"문화재대한민국", "고등학교대한민국", "대한민국",   # NNP 허브 (컷)
+             "최양업최양업", "최양업",                        # 중복접합 (컷)
+             "안성농업고등전문학교", "안성농업전문학교", "전문학교"}  # 진짜 (보존)
+    pairs = {(h["parent"], h["child"]) for h in induce_suffix_hierarchy(names, kiwi=kiwi)}
+    # NNP 상위어(대한민국)는 허브에서 제거
+    assert not any(p == "대한민국" for p, _ in pairs), "NNP '대한민국'이 상위어로 남음"
+    # 중복접합 child 제거
+    assert ("최양업", "최양업최양업") not in pairs, "중복접합 '최양업최양업' 잔존"
+    # 진짜 보통명사(NNG) 상위어 계층은 보존
+    assert ("전문학교", "안성농업고등전문학교") in pairs
+    assert ("전문학교", "안성농업전문학교") in pairs
+
+
 def test_definitional_hierarchy_heterogeneous():
     """정의문 계층 — 접미공유가 원리적 불가한 이질계층(강아지⊂동물). extras[korean].
     외부 gold(Wikidata P279) 심판루프 89/100 검증 로직의 본체화."""

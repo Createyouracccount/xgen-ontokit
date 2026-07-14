@@ -54,6 +54,23 @@ def _morph_suffix_ok(child: str, parent: str, kiwi) -> bool:
     return False
 
 
+def _parent_is_proper_noun(parent: str, kiwi) -> bool:
+    """parent(상위어 후보)의 핵심어(마지막 토큰)가 고유명사(NNP)인가.
+
+    접미공유 계층은 **동종 하위개념 ⊂ 상위범주**(보험업·문법학파·전문학교=보통명사)를
+    유도한다. 국가·기관·인명 같은 고유명사(대한민국·일본·한밭대학교)는 상위 *범주*가
+    아니라 개체이므로 `X ⊂ 대한민국` 은 계층적으로 성립하지 않는다(그런 소속은
+    member_of 관계의 몫). mixed20k 실측: '대한민국'이 15개 접합 클래스(문화재대한민국·
+    고등학교대한민국)의 허브가 돼 그래프를 오염 → 상위어 head 가 NNP 면 허브 거부.
+    ⚠️ 형태소 게이트(_morph_suffix_ok)가 못 막는 케이스 — child 가 [문화재,대한민국]
+    처럼 진짜 형태소 경계에서 갈리면 게이트는 통과시키지만, parent 가 고유명사라
+    애초에 상위범주 부적격. 심판 에이전트 검증: NNP head 는 진짜 복합어 상위어
+    (보험업/학파/전문학교=NNG)와 직교라 회귀 0(진짜 계층 오탈락 없음).
+    """
+    forms = kiwi.tokenize(parent)
+    return bool(forms) and forms[-1].tag == "NNP"
+
+
 def induce_suffix_hierarchy(class_names: set[str],
                             min_children: int = MIN_CHILDREN, *, kiwi=None) -> list[dict]:
     """클래스 집합에서 접미 공유 subClassOf 유도 (인덱스화 + 허브 필터, 한·영).
@@ -120,6 +137,14 @@ def induce_suffix_hierarchy(class_names: set[str],
         children = parent_to_children[parent]
         if len(children) < min_children:
             continue
+        # 상위어 head 가 고유명사(NNP)면 허브 거부 — 국가·기관·인명은 상위범주 부적격
+        # (X⊂대한민국 류 접합 클래스 오염 차단). parent 1회 판정(child 루프 밖).
+        if kiwi is not None and _parent_is_proper_noun(names[parent], kiwi):
+            continue
         for child in sorted(children):
+            # 중복 접합(child == parent+parent, 예: 최양업최양업·외래어표기법외래어표기법)
+            # 거부 — NNP 게이트가 못 잡는 보통명사 상위어의 자기중복(Kiwi 오분절 포함).
+            if names[child] == names[parent] + names[parent]:
+                continue
             out.append({"parent": names[parent], "child": names[child]})
     return out
