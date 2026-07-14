@@ -12,6 +12,15 @@
 입력: (문장, subject, object) 개체쌍 → 30개 KLUE 관계 라벨. NER(KoElectra)이 인스턴스를
 주므로, 이 채널은 한 청크 내 개체쌍을 조합해 관계 타입을 분류한다. typed entity marker
 방식(학습과 동일): "[S:ORG] 금호고속 [/S] [O:PER] 이덕연 [/O] 사장 …".
+
+모델 교체(나중에 다른 모델로): 이 클래스는 본체 관계 채널 계약
+(.extract(text, *, source_chunks) -> list[dict])을 구현하는 드롭인 채널 중 하나다.
+  ① 같은 KLUE 형식 다른 가중치 → env ONTOKIT_RELATION_ENCODER_MODEL 만 변경(로컬경로/HF id).
+     조건: 30 KLUE 라벨 출력 + 위 typed marker 입력 이해.
+  ② 더 큰 모델 → eval/relation/train_encoder.py MODEL 한 줄 바꿔 재학습.
+  ③ 코드 직접 주입 → DeterministicKoreanExtractor(relation_extractor=enc, ner=...)(env보다 우선).
+  ④ 다른 라벨 체계·방식 → .extract() 계약으로 감싼 새 클래스를 ③처럼 주입.
+정본: eval/relation/README.md '모델 교체' 절.
 """
 from __future__ import annotations
 import logging

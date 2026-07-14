@@ -70,6 +70,25 @@ holdout(공식 validation 7,765, no_rel 59.6%) 최종:
   환경의 폴백 가치도 한계적(vs prior +3pp).
 - 인코더학습∩holdout 완전동일 (문장,subj,obj) 3건 존재(7,765 중 3, 효과 무시 가능).
 
+## 모델 교체 (나중에 다른 모델로 바꾸는 법)
+
+본체는 특정 모델에 묶이지 않는다. 관계 채널은 `.extract(text, *, source_chunks) -> list[dict]`
+계약만 요구하므로, 모델 교체 = 채널 객체 교체다. 4가지 경우:
+
+| 원하는 것 | 방법 | 수정 범위 |
+|---|---|---|
+| 같은 KLUE 형식 다른 가중치 | env `ONTOKIT_RELATION_ENCODER_MODEL` = 로컬경로 or HF hub id | 없음 |
+| 더 큰 모델로 재학습 | `train_encoder.py` MODEL 한 줄(예: klue/roberta-large) + 재학습 | 스크립트 1줄 |
+| 코드에서 직접 주입 | `DeterministicKoreanExtractor(relation_extractor=enc, ner=...)` — env보다 우선 | 호출부만 |
+| 다른 라벨 체계·방식 | `.extract()` 계약으로 래핑한 새 클래스를 위처럼 주입 | 새 래퍼 1개 |
+
+**교체 조건(경우 1·2)**: 30개 KLUE 라벨 출력 + typed marker 입력
+(`[S:ORG] … [/S] [O:PER] … [/O]`) 이해. 라벨 체계가 다르면 경우 4(래퍼).
+
+현재 드롭인 호환 채널 3종(전부 `.extract()` 계약):
+`KoreanRelationExtractor`(규칙 조사SVO) / `KoreanRelationEncoder`(KLUE-RE 인코더) /
+`HybridRelationExtractor`(규칙+LLM top-up). 새 모델도 같은 계약으로 감싸면 끝.
+
 ## 주의
 
 - `model_re/` 가중치(~270MB)는 git 미커밋 — `train_encoder.py`로 재현(시드 고정).
