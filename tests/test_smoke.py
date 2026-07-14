@@ -283,6 +283,63 @@ def test_extract_dict_accumulation():
     assert found
 
 
+def test_class_promotion_gate_large_corpus():
+    """클래스 승격 게이트(심판 OR-게이트) — df=1 고아 컷 + 계층 참여 보존 + NER 동일명 강등.
+    mixed20k 실측(클래스 95%가 df=1 고아, completeness 5%) 기반. 소규모 코퍼스는 별도 테스트."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+    except ImportError:
+        pytest.skip("의존성 미설치")
+
+    class _MockNER:  # '한국관광공사'를 개체로 방출 — 동일명 클래스 강등 검증
+        def entities(self, text, *, source_chunks):
+            if "한국관광공사" in text:
+                return [{"entity": "한국관광공사", "class": "기관",
+                         "type": "INSTANCE", "source_chunks": source_chunks}]
+            return []
+    ext = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False,
+                                       enable_hearst=False)
+    # 500+ 청크 (df 게이트 활성). 패딩 청크는 명사 없는 텍스트.
+    docs = {"d": (
+        [{"chunk_id": "c1", "chunk_text": "생명보험업과 손해보험업은 성장했다"},
+         {"chunk_id": "c2", "chunk_text": "생명보험업과 손해보험업이 있다"},
+         {"chunk_id": "c3", "chunk_text": "희귀복합명사표본 이 단어는 여기 한 번만 나온다"},
+         {"chunk_id": "c4", "chunk_text": "한국관광공사가 발표했다"},
+         {"chunk_id": "c5", "chunk_text": "한국관광공사는 서울에 있다"},
+         {"chunk_id": "c6", "chunk_text": "국고사업선정과 활동지원사업선정이 진행된다"},
+         # 사업선정은 c7 에만(df=1) — 계층 허브 참여만으로 보존됨을 검증
+         {"chunk_id": "c7", "chunk_text": "국고사업선정과 활동지원사업선정 및 사업선정이 있다"}]
+        + [{"chunk_id": f"p{i}", "chunk_text": "그렇게 되었다"} for i in range(500)]
+    )}
+    concepts, ents, *_ = asyncio.run(ext.extract(docs))
+    names = {c["name"] for c in concepts["classes"]}
+    # df≥2 (c1,c2) → 보존
+    assert "생명보험업" in names and "손해보험업" in names
+    # 계층 참여(사업선정 허브) → df=1 이어도 보존 (OR-게이트 핵심, 심판 A-1)
+    hier = {(h["parent"], h["child"]) for h in concepts["class_hierarchy"]}
+    assert ("사업선정", "국고사업선정") in hier
+    assert "사업선정" in names
+    # df=1 ∧ 고아 → 탈락
+    assert "희귀복합명사표본" not in names
+    # NER 동일명(한국관광공사, df=2 지만 고아) → 강등 (df 무관, 심판 B 판정)
+    assert "한국관광공사" not in names
+    assert concepts["class_gate_stats"]["dropped_ner_dup"] >= 1
+
+
+def test_class_promotion_gate_small_corpus():
+    """소규모 코퍼스(<500청크) — df 조건 비활성, df=1 정당 도메인 용어 보존(심판 A-2).
+    tester_trade(309청크) 류 도메인 코퍼스 학살 방지."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+        ext = DeterministicKoreanExtractor(enable_relations=False, enable_hearst=False)
+    except ImportError:
+        pytest.skip("의존성 미설치")
+    docs = {"d": [{"chunk_id": "c1", "chunk_text": "검사부품목록 을 검토했다"}]}
+    concepts, *_ = asyncio.run(ext.extract(docs))
+    names = {c["name"] for c in concepts["classes"]}
+    assert "검사부품목록" in names  # df=1 이지만 소규모 코퍼스 → 보존
+
+
 def test_extract_en_skip_stats():
     """영어 청크 침묵 스킵 방지 — skipped_en_chunks 노출(#5)."""
     try:

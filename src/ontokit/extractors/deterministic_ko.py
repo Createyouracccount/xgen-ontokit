@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 _HANGUL = re.compile(r"[가-힣]")
 _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")  # 라틴 2자+ 연속 (단독 기호·항번호 제외)
 
+# 클래스 승격 게이트의 df 조건이 활성화되는 최소 코퍼스 청크 수. 이보다 작은
+# 코퍼스(도메인 문서 수십~수백 청크)는 정당 용어도 대부분 df=1 이라 df 컷이
+# TBox 절멸이 됨(심판 A-2) — 계층참여·NER동일명 조건만 적용.
+CLASS_DF_GATE_MIN_CHUNKS = 500
+
 
 class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
@@ -182,6 +187,7 @@ class DeterministicKoreanExtractor:
         # stats 로 노출. "문서 500 조용한 누락" 류 함정 재발 차단.
         skipped_en_chunks = 0
         hearst_pairs: list[dict] = []
+        n_chunks = 0  # 처리 청크 수 — 승격 게이트의 소규모 코퍼스 판정용
 
         # NER 배치 수집 버퍼 — 청크별 단건 forward(CPU 891ms/청크, 2만 청크=297분)를
         # 언어별로 모아 배치 forward(430ms/청크)로 바꾼다. (doc_name, text, sc) 튜플.
@@ -195,6 +201,7 @@ class DeterministicKoreanExtractor:
                 text = ch.get("chunk_text", "")
                 if not text.strip():
                     continue
+                n_chunks += 1
                 sc = [cid] if cid else []
                 lang = detect_lang(text)
                 # ① 명사→클래스: 한·영 이중 추출 (v0.6) — 혼합 청크의 소수언어 용어 보존.
@@ -265,37 +272,72 @@ class DeterministicKoreanExtractor:
             except Exception:
                 pass  # hybrid 실패는 비치명 — 규칙 결과(있으면) 유지, 관계 없이 진행
 
-        # 루프 밖 1회 리스트화 — merged 스키마 구성.
-        merged = {
-            "classes": [{"name": nm, "description": "", "parent": None,
-                         "source_chunks": list(chunks)}
-                        for nm, chunks in class_chunks.items()],
-            "object_properties": list(existing.get("object_properties", [])) if existing else [],
-            "datatype_properties": list(existing.get("datatype_properties", [])) if existing else [],
-            "class_hierarchy": list(existing.get("class_hierarchy", [])) if existing else [],
-        }
-        if skipped_en_chunks:
-            merged["skipped_en_chunks"] = skipped_en_chunks
-
         # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관). 인덱스화+허브필터(O(N·L²)).
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업, 동종계층).
         #   접미공유(동종)와 정의문(이질, hearst_ko 종결패턴)은 상보 — merge 시 superset.
         #   정의문 계층은 enable_hearst(기본 on, v0.12~, 외부gold 심판루프 89/100 검증).
-        merged["class_hierarchy"].extend(
+        #   ⚠️클래스 승격 게이트(④')보다 먼저 — 계층 참여가 게이트의 보존 조건이므로
+        #   전체 클래스 후보 위에서 유도해야 df=1 자식(안성농업전문학교 류)이 살아남는다.
+        all_hier = list(existing.get("class_hierarchy", [])) if existing else []
+        all_hier.extend(
             induce_suffix_hierarchy(set(class_chunks.keys()), kiwi=self.nouns.kiwi))
         if hearst_pairs:
-            merged["class_hierarchy"].extend(hearst_pairs)
+            all_hier.extend(hearst_pairs)
         # ⚠️pair 단위 dedup — existing 이어빌드 시 기존 hierarchy + 재유도 결과가 겹쳐
         # 패스마다 동일 pair 가 선형 증식(2→4→6, 0711 리뷰 실측)했고, 중복 pair 는
         # OWL disjoint 의 형제 리스트에 중복 URI 를 넣어 자기-disjoint(unsatisfiable)
         # 트리플까지 유발했다. 순서 보존 dedup.
         seen_pairs: set = set()
         uniq_hier = []
-        for h in merged["class_hierarchy"]:
+        for h in all_hier:
             k = (h.get("parent"), h.get("child"))
             if k[0] and k[1] and k[0] != k[1] and k not in seen_pairs:
                 seen_pairs.add(k)
                 uniq_hier.append(h)
-        merged["class_hierarchy"] = uniq_hier
+
+        # ④' 클래스 승격 게이트 (심판 OR-게이트) — 보존 = 계층 참여 OR df≥2.
+        #   mixed20k 실측: 클래스 95%가 df=1(단일 청크 출현) 고아 → completeness 5%,
+        #   text-index 노이즈. 순수 df≥2 는 계층 자식·소코퍼스 정당용어를 학살(심판
+        #   A-1/A-2 기각) → 계층 참여 클래스는 df 무관 보존 + 소규모 코퍼스(<500청크)
+        #   는 df 조건 비활성(76~309청크 도메인 코퍼스의 df=1 정당용어 보호).
+        #   NER 동일명 강등 — 개체명이 클래스로 이중 존재(TBox/ABox 중복, 실측 17.3%:
+        #   PeterCushing·베트남·광주광역시)하면 **고아에 한해** 강등(연결된 동명은
+        #   punning 합법 — NER 오탐 1건이 정당 TBox 를 지우는 비용 구조 차단, 심판 B).
+        #   탈락은 침묵하지 않고 stats 로 방출(no silent caps).
+        hier_names = {h["parent"] for h in uniq_hier} | {h["child"] for h in uniq_hier}
+        inst_norms = {e.get("entity", "").replace(" ", "")
+                      for ents in all_entities.values() for e in ents}
+        inst_norms.discard("")
+        df_gate_active = n_chunks >= CLASS_DF_GATE_MIN_CHUNKS
+        kept_classes: dict[str, set] = {}
+        n_drop_df1 = n_drop_dup = 0
+        for nm, chunks in class_chunks.items():
+            if nm not in hier_names:
+                if nm.replace(" ", "") in inst_norms:
+                    n_drop_dup += 1      # 동일명 인스턴스 존재 — ABox 가 담당
+                    continue
+                if df_gate_active and len(chunks) < 2:
+                    n_drop_df1 += 1      # df=1 ∧ 고아 — 어느 검색 leg 에도 기여 없음
+                    continue
+            kept_classes[nm] = chunks
+
+        merged = {
+            "classes": [{"name": nm, "description": "", "parent": None,
+                         "source_chunks": list(chunks)}
+                        for nm, chunks in kept_classes.items()],
+            "object_properties": list(existing.get("object_properties", [])) if existing else [],
+            "datatype_properties": list(existing.get("datatype_properties", [])) if existing else [],
+            "class_hierarchy": uniq_hier,
+        }
+        if skipped_en_chunks:
+            merged["skipped_en_chunks"] = skipped_en_chunks
+        if n_drop_df1 or n_drop_dup:
+            merged["class_gate_stats"] = {
+                "kept": len(kept_classes), "dropped_df1_orphan": n_drop_df1,
+                "dropped_ner_dup": n_drop_dup, "df_gate_active": df_gate_active,
+            }
+            logger.info("클래스 승격 게이트: %d 후보 → %d 보존 (df1고아 %d·NER동일명 %d 탈락, df게이트=%s)",
+                        len(class_chunks), len(kept_classes), n_drop_df1, n_drop_dup,
+                        df_gate_active)
 
         return merged, all_entities, all_relations, all_data_props
