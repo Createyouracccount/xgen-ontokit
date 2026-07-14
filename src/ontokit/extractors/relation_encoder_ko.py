@@ -56,8 +56,15 @@ _CLASS_TO_KLUE_TYPE = {
 # 관계 subject 는 KLUE 정의상 PER 또는 ORG 만. object 는 6종.
 _SUBJ_TYPES = frozenset({"PER", "ORG"})
 
-# 개체쌍 폭발 방지 — 한 청크에서 만들 최대 쌍 수(근접 우선). 대용량 빌드 보호.
+# 개체쌍 폭발 방지 — 한 청크에서 만들 최대 쌍 수. 대용량 빌드 보호.
+# ⚠️상한 삭감은 관계 손실 직결(mixed20k 밀집청크 실측: 60→40 시 관계 -26%, 잘리는
+# 쌍에서도 실관계 다수 — "먼 쌍은 희박" 가정 반증). 속도는 상한이 아니라 배치추론으로
+# 사야 한다(extract_batch). 60 유지.
 MAX_PAIRS_PER_CHUNK = 60
+# 인코더 forward 배치 크기 — self._pipe 에 미지정 시 HF 는 1건씩 순차 추론(CPU 손해).
+# NER(entities_batch=32)과 동일하게 배치화. mixed20k 실측: 밀집청크 batch=1 82.6초→
+# batch=32 40.0초(2.07배), 관계 결과 불변. 상한 삭감(관계 손실) 대신 이걸로 속도 확보.
+ENC_BATCH_SIZE = 32
 # 인코더 입력 토큰 상한(학습 MAX_LEN=180과 일치).
 MAX_LEN = 180
 
@@ -171,7 +178,11 @@ class KoreanRelationEncoder:
             return []
         try:
             with self._lock:
-                preds = self._pipe(marked, truncation=True, max_length=MAX_LEN)
+                # batch_size 지정 — 미지정 시 HF 가 쌍을 1건씩 순차 forward(CPU 실측
+                # 2배 손해). 청크 내 쌍을 배치 forward. 청크 간 배치는 이득 미미(실측
+                # 1.01배) — HF 스케줄러가 이미 근사 처리, 추가 복잡도 없이 이걸로 충분.
+                preds = self._pipe(marked, truncation=True, max_length=MAX_LEN,
+                                   batch_size=ENC_BATCH_SIZE)
         except Exception:
             logger.warning("관계 인코더 추론 실패 — 청크 관계 생략", exc_info=True)
             return []
@@ -181,10 +192,8 @@ class KoreanRelationEncoder:
             label = top.get("label", "")
             score = float(top.get("score", 0.0))
             # HF 라벨이 'LABEL_10' 형식이면 인덱스 파싱
-            lid = None
             if label.startswith("LABEL_"):
-                lid = int(label.split("_")[1])
-                label = KLUE_RE_LABELS[lid]
+                label = KLUE_RE_LABELS[int(label.split("_")[1])]
             if label == "no_relation" or score < self._min_score:
                 continue
             key = (sw, label, ow)

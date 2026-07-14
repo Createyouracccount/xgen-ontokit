@@ -226,7 +226,8 @@ class DeterministicKoreanExtractor:
                 #   조사(JKS/JKO)는 한글 문장에만 나타나므로 영어 문장엔 원리적으로 무해.
                 # 관계 추출기가 코퍼스레벨(extract_corpus, 예: hybrid top-up)이면
                 # 청크를 모아 루프 뒤 1회 호출(예산 가드레일이 코퍼스 전체 기준으로
-                # 작동해야 LLM-free 가치 보존). 청크별 extract 면 여기서 즉시.
+                # 작동해야 LLM-free 가치 보존). 청크별 extract 면 여기서 즉시(인코더는
+                # extract 내부에서 청크 내 쌍을 batch_size 로 배치 forward — CPU 2배).
                 if self.relations is not None and _HANGUL.search(text):
                     if self._rel_is_corpus:
                         rel_chunk_buf.append({"chunk_id": cid, "chunk_text": text})
