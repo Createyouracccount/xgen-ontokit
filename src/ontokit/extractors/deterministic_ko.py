@@ -8,6 +8,7 @@ XGEN pipeline은 이것을 gpt-4o DocumentOntologyExtractor 대신 주입 가능
 """
 from __future__ import annotations
 import asyncio
+import logging
 import re
 import threading
 from typing import Optional
@@ -16,6 +17,8 @@ from ..morphology.kiwi_nouns import KiwiNounExtractor
 from ..hierarchy.suffix_share import induce_suffix_hierarchy
 from ..hierarchy.hearst_ko import definitional_pairs
 from ..utils.lang_detect import detect_lang
+
+logger = logging.getLogger(__name__)
 
 _HANGUL = re.compile(r"[가-힣]")
 _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")  # 라틴 2자+ 연속 (단독 기호·항번호 제외)
@@ -60,8 +63,7 @@ class DeterministicKoreanExtractor:
             if relation_extractor is not None:
                 self.relations = relation_extractor
             else:
-                from .relation_ko import KoreanRelationExtractor
-                self.relations = KoreanRelationExtractor(kiwi=self.nouns.kiwi)
+                self.relations = self._default_relation_extractor()
         # 코퍼스레벨 관계추출기(extract_corpus, 예: hybrid) 판별 — 청크별 extract 대신
         # 루프 뒤 1회 호출(예산 가드레일이 코퍼스 전체 기준으로 작동).
         self._rel_is_corpus = (self.relations is not None
@@ -75,6 +77,31 @@ class DeterministicKoreanExtractor:
         # 정의문 밀도 높은 코퍼스(법령·규정)에서 opt-in 으로 켠다. A/B 순도 실측 후 결정.
         self.enable_hearst = enable_hearst
         self._lock = threading.Lock()
+
+    def _default_relation_extractor(self):
+        """관계 채널 선택 — env ONTOKIT_RELATION_ENCODER_MODEL 지정 + import 가능 시
+        KLUE-RE 인코더(심판 90/100), 아니면 규칙 조사SVO 폴백.
+
+        불변식: env 미지정이거나 extras[relation-encoder] 미설치면 규칙 채널.
+        "설치·설정 안 하면 인코더는 안 켜진다"(사용자 요건). 인코더는 NER(self.ner)로
+        개체쌍을 만들므로 NER 도 있어야 실효 — NER 없으면 인코더는 빈 결과라 규칙 사용.
+        정본: docs/ontokit_관계_KLUE-RE_인코더_심판루프_90_2026_07_14.md."""
+        import os
+        from .relation_ko import KoreanRelationExtractor
+
+        model = os.getenv("ONTOKIT_RELATION_ENCODER_MODEL")
+        if model and self.ner is not None:
+            try:
+                from .relation_encoder_ko import KoreanRelationEncoder
+                enc = KoreanRelationEncoder(model=model, ner=self.ner)
+                enc.warmup()  # 모델 즉시 로드 — 실패 시 여기서 규칙 폴백(지연 로드로
+                              # 매 청크 실패하는 것 방지). extras 미설치·경로 오류 적발.
+                logger.info("관계 채널 = KLUE-RE 인코더(%s)", model)
+                return enc
+            except Exception:
+                # extras[relation-encoder] 미설치·모델 로드 실패 → 규칙 폴백(불변식)
+                logger.warning("관계 인코더 로드 실패 — 규칙 조사SVO 폴백", exc_info=True)
+        return KoreanRelationExtractor(kiwi=self.nouns.kiwi)
 
     @staticmethod
     def _run_ner_batched(ner, buf: list[tuple[str, str, list]],

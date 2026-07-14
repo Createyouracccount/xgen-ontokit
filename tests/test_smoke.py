@@ -105,6 +105,65 @@ def test_definitional_hierarchy_backcompat():
     assert isinstance(pairs, list)
 
 
+def test_relation_encoder_fallback_no_env(monkeypatch):
+    """관계 인코더 불변식 ① — env 미지정이면 규칙 조사SVO 채널(인코더 미로드)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    monkeypatch.delenv("ONTOKIT_RELATION_ENCODER_MODEL", raising=False)
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+    ex = DeterministicKoreanExtractor()
+    assert type(ex.relations).__name__ == "KoreanRelationExtractor"
+
+
+def test_relation_encoder_fallback_no_ner(monkeypatch):
+    """관계 인코더 불변식 ② — env 지정돼도 NER 없으면 개체쌍 불가 → 규칙 폴백."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    monkeypatch.setenv("ONTOKIT_RELATION_ENCODER_MODEL", "/any/path")
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+    ex = DeterministicKoreanExtractor()  # ner=None
+    assert type(ex.relations).__name__ == "KoreanRelationExtractor"
+
+
+def test_relation_encoder_fallback_bad_path(monkeypatch):
+    """관계 인코더 불변식 ③ — env+NER 있어도 모델 경로 오류면 규칙 폴백(warmup 적발)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import logging
+    logging.disable(logging.CRITICAL)
+    monkeypatch.setenv("ONTOKIT_RELATION_ENCODER_MODEL", "/nonexistent/model/path")
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+
+    class _MockNER:
+        def entities(self, text, *, source_chunks):
+            return []
+    ex = DeterministicKoreanExtractor(ner=_MockNER())
+    # 경로 오류 → warmup 실패 → 규칙 폴백(LLM-free·프로덕션 안전 불변식)
+    assert type(ex.relations).__name__ == "KoreanRelationExtractor"
+    logging.disable(logging.NOTSET)
+
+
+def test_relation_encoder_type_mapping():
+    """modu-ner 클래스 → KLUE 타입 결정적 매핑 + typed marker 규약."""
+    from ontokit.extractors.relation_encoder_ko import _klue_type, _mark
+    assert _klue_type("인물") == "PER"
+    assert _klue_type("기관") == "ORG"
+    assert _klue_type("지역") == "LOC"
+    assert _klue_type("날짜") == "DAT"
+    assert _klue_type("수량") == "NOH"
+    assert _klue_type("용어") == "POH"      # 미등록 고유명 → POH 폴백
+    m = _mark("금호고속 이덕연 사장", "금호고속", "ORG", "이덕연", "PER")
+    assert "[S:ORG]" in m and "[O:PER]" in m and "[/S]" in m and "[/O]" in m
+    # 중첩·미출현 개체쌍 → None(스킵)
+    assert _mark("금호고속만 있다", "금호고속", "ORG", "없음", "PER") is None
+
+
 def test_suffix_hierarchy_scale():
     """수십만 클래스 선형 — O(N²) 재발 방지 회귀(#1)."""
     import time

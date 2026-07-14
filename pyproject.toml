@@ -10,6 +10,7 @@ dependencies = []   # 코어 의존성 0 (omnifuse 철학). 백엔드·모델은
 korean = ["kiwipiepy>=0.18"]            # 형태소·복합명사(한국어)
 english = ["nltk>=3.8"]                  # 영어 명사구 추출(POS)
 ner = ["transformers>=4.40", "torch>=2.0"]  # KoELECTRA(ko)·dslim BERT(en) NER
+relation-encoder = ["transformers>=4.40", "torch>=2.0"]  # KLUE-RE 파인튜닝 관계 인코더(ko). 미설치 시 규칙 폴백
 discover = ["soynlp>=0.0.5"]            # 도메인 신조어 자동 발굴
 owl = ["rdflib>=6.0"]                   # 결정적 OWL/TTL 생성
 fuseki = ["httpx>=0.27"]               # GraphStore 백엔드
