@@ -13,3 +13,10 @@ eval/relation/model_re/
 eval/relation/data/*.parquet
 eval/relation/data/*.json
 eval/relation/train_log.txt
+
+# ER eval 대용량 — 재현 가능(위키API/우리말샘 GitHub미러/스크립트). 미커밋.
+eval/entity_resolution/data/urimalsam/
+eval/entity_resolution/data/*.txt
+eval/entity_resolution/data/*.json
+eval/entity_resolution/data/*.xml
+eval/entity_resolution/*.log
