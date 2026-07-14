@@ -7,3 +7,9 @@ dist/
 .ruff_cache/
 .venv/
 *.egg
+
+# eval 산출물 — 스크립트로 재현(train_encoder.py / HF 재다운). 대용량 미커밋.
+eval/relation/model_re/
+eval/relation/data/*.parquet
+eval/relation/data/*.json
+eval/relation/train_log.txt
