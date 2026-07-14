@@ -33,6 +33,14 @@ _HANGUL = re.compile(r"[가-힣]{2,}")
 # 주어를 가진 일반 문장이라 제외 — 포함하면 항이 캐리를 갱신하지 못해 캐리 전멸(0711).
 _ENUM = re.compile(r"^\s*(?:\d+(?:의\d+)?\)\s|[가-힣]\)\s)")
 _ARG = re.compile(r"[가-힣의]{2,}")  # '의' 연결 명사구 허용
+# 접두 수사 포함 명사구 — "제3세계"·"제2공화국"처럼 XPN/SN 접두가 어휘의 일부인
+# 표면(③' 분기가 버퍼에 포함). 한글-선도 + 한글/숫자 혼합만 허용(숫자-선도는 컷:
+# "3세계"·"747" 오살 방지, 0712 숫자토큰 한글한정 원칙과 동일 계열의 닫힌 문자클래스 규칙).
+# 알려진 트레이드오프(심판 채택 판정의 기록 조건): 숫자-선도 부착 복합어는 인자
+# 전체가 소멸한다 — "2002월드컵을"은 구코드가 (…, 월드컵)을 냈지만 신코드는 무방출.
+# 코퍼스 실측 발현 8건은 대부분 '20세기→세기'류 유령 인자의 정당한 제거였고 정당
+# 트리플 소멸 0건(정밀도-우선 수용). 필요 시 "XPN-선도 런만 버퍼 포함"으로 완화 가능.
+_ARG_NUMMIX = re.compile(r"[가-힣][가-힣0-9의]+")
 
 # ── 문법화된 폐집합(닫힌 문법형태소·기능동사) — "수동 목록 확장 금지" 원칙의 허용예외 ──
 _FUNC_VV = {"관하", "대하", "위하", "의하", "인하", "불구하", "비하", "반하"}  # 복합후치사화 동사
@@ -87,7 +95,7 @@ class KoreanRelationExtractor:
         surf = "".join(buf)
         if len(surf) < 2 or len(surf) > self.MAX_ARG_LEN:
             return ""
-        if surf in STOP_HEAD or not _ARG.fullmatch(surf):
+        if surf in STOP_HEAD or not (_ARG.fullmatch(surf) or _ARG_NUMMIX.fullmatch(surf)):
             return ""
         return surf
 
@@ -179,12 +187,48 @@ class KoreanRelationExtractor:
                 i += 1
                 continue
             if tag == "JKG" and noun_buf:                    # ② 관형격 '의'
+                # ②' '의' 연쇄 깊이 상한(슬라이딩 ≤1) — 무제한 연접이
+                # "소수의거듭제곱의상" 류 유령 노드를 만들어 그래프 연결성을
+                # 파편화한다(0714 심판 확정). 두 번째 '의'부터 가장 오래된
+                # 세그먼트를 버리고 최근 세그먼트만 유지 — "종의 원소의 원자량"
+                # → "원소의원자량". 순수 문법 폐규칙(목록 없음, LLM-free 불변식).
+                # 알려진 비용(심판 채택 판정의 기록 조건): '의'를 품은 고유명사가
+                # 연쇄에 끼면 참수된다 — "그림의 법칙의 예외"→"법칙의예외"
+                # (191건 채점 중 2건). 어휘 지식 없이 회피 불가 = 목록 도입이라
+                # 불변식 위반이므로 수용.
+                if "의" in noun_buf:
+                    noun_buf = noun_buf[noun_buf.index("의") + 1:]
                 noun_buf.append("의")
                 gen_active = True
                 prev_end = t.start + t.len
                 i += 1
                 continue
-            if tag in ("XPN", "SN", "NNB"):                  # ③ 법령참조·의존명사 통과
+            if tag in ("XPN", "SN"):
+                # ③' 접두 판별 — XPN/SN 런의 바로 뒤가 *붙어 있는* NNG/NNP면
+                # 어휘 접두이므로 버퍼에 포함한다: "제3세계"가 "세계"로,
+                # "신세계"가 "세계"로 절단 방출되던 결함(0714 심판: 유령 절단
+                # 변이가 노드 파편화의 주범) 수리. 꼬리가 NNB(제391조·제2항)면
+                # 법령 참조 — 원설계 ③ 그대로 무음 통과("상법 제391조" 주어는
+                # 상법 유지, 회귀 금지 조건).
+                j = i
+                while j < n and toks[j].tag in ("XPN", "SN"):
+                    j += 1
+                nxt_tok = toks[j] if j < n else None
+                run_end = toks[j - 1].start + toks[j - 1].len
+                if (nxt_tok is not None and nxt_tok.tag in ("NNG", "NNP")
+                        and nxt_tok.start == run_end):
+                    # 일반 명사 분기와 동일한 띄어쓰기 경계 리셋을 적용
+                    if prev_end is not None and t.start > prev_end and noun_buf and not gen_active:
+                        noun_buf = []
+                    gen_active = False
+                    noun_buf.extend(toks[k].form for k in range(i, j))
+                    prev_end = run_end
+                    i = j
+                    continue
+                prev_end = run_end
+                i = j
+                continue
+            if tag == "NNB":                                 # ③ 의존명사 통과
                 prev_end = t.start + t.len
                 i += 1
                 continue

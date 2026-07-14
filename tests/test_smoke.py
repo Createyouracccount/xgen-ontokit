@@ -1280,3 +1280,52 @@ def test_hybrid_usd_cap_tight_zero_calls():
     assert rep["spent_usd"] <= 0.02, f"타이트 상한 초과: {rep['spent_usd']}"
     # 1콜 최악비용($worst)이 상한보다 크면 마진 예약으로 0콜(안전 폴백)
     assert rep["llm_called"] == 0, f"타이트 상한인데 {rep['llm_called']}콜(초과위험)"
+
+
+def test_relation_xpn_prefix_preserved():
+    """③' XPN/SN 접두 보존 — "제3세계"가 "세계"로 절단 방출되던 유령 변이 수리(0714 심판).
+    꼬리가 NNB(제391조)인 법령 참조는 원설계대로 무음 통과(주어 '상법' 유지 = 회귀 금지)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.extractors.relation_ko import KoreanRelationExtractor
+    ex = KoreanRelationExtractor()
+    tris = ex.extract("제3세계가 천문대를 결정한다.", source_chunks=["t"])
+    assert [(t["subject"], t["object"]) for t in tris] == [("제3세계", "천문대")]
+    tris = ex.extract("멋진 신세계가 천문대를 결정한다.", source_chunks=["t"])
+    assert tris and tris[0]["subject"] == "신세계"
+    # 법령 참조 회귀 가드: "상법 제391조를" 의 인자는 여전히 '상법'
+    tris = ex.extract("이사는 상법 제391조를 준수한다.", source_chunks=["t"])
+    assert tris and tris[0]["object"] == "상법"
+
+
+def test_relation_jkg_depth_cap():
+    """②' '의' 연쇄 깊이 상한(슬라이딩 ≤1) — "소수의거듭제곱의상" 3중 연접 유령 노드
+    차단(0714 심판). 최근 세그먼트만 유지: 종의 원소의 원자량 → 원소의원자량."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.extractors.relation_ko import KoreanRelationExtractor
+    ex = KoreanRelationExtractor()
+    tris = ex.extract("함수는 소수의 거듭제곱의 상을 결정한다.", source_chunks=["t"])
+    assert tris and tris[0]["object"] == "거듭제곱의상"  # 깊이 1로 절단(소수의 탈락)
+    # 깊이 1 정상 케이스는 그대로
+    tris = ex.extract("정부는 도봉산의 이름을 명명한다.", source_chunks=["t"])
+    assert tris and tris[0]["object"] == "도봉산의이름"
+
+
+def test_relation_nummix_gate():
+    """숫자 혼합 인자 게이트 — 한글-선도 혼합("제3세계")만 허용, 숫자-선도("747")는 컷
+    (0712 숫자토큰 한글한정 원칙과 동일 계열)."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.extractors.relation_ko import KoreanRelationExtractor
+    ex = KoreanRelationExtractor()
+    tris = ex.extract("보잉이 747 기종을 판매한다.", source_chunks=["t"])
+    # 747은 인자로 방출 금지 — 기종만
+    assert tris and tris[0]["object"] == "기종"
+    assert all("747" not in t["object"] and "747" not in t["subject"] for t in tris)
