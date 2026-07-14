@@ -281,7 +281,8 @@ class DeterministicKoreanExtractor:
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업, 동종계층).
         #   접미공유(동종)와 정의문(이질, hearst_ko 종결패턴)은 상보 — merge 시 superset.
         #   정의문 계층은 enable_hearst(기본 on, v0.12~, 외부gold 심판루프 89/100 검증).
-        merged["class_hierarchy"].extend(induce_suffix_hierarchy(set(class_chunks.keys())))
+        merged["class_hierarchy"].extend(
+            induce_suffix_hierarchy(set(class_chunks.keys()), kiwi=self.nouns.kiwi))
         if hearst_pairs:
             merged["class_hierarchy"].extend(hearst_pairs)
         # ⚠️pair 단위 dedup — existing 이어빌드 시 기존 hierarchy + 재유도 결과가 겹쳐

@@ -33,8 +33,29 @@ MIN_SUFFIX_LEN = 2   # 상위개념 후보 최소 길이 (1글자 접미 '학'/'
 MIN_CHILDREN = 2     # 허브 임계 — 이만큼의 child 접미로 등장해야 상위로 인정
 
 
+def _morph_suffix_ok(child: str, parent: str, kiwi) -> bool:
+    """parent 가 child 의 **형태소 경계** 접미인가 (문자 파편 거부).
+
+    빈도 임계(MIN_CHILDREN)만으론 못 막는 파편 상위어를 컷한다. mixed20k 실측:
+    '대한민국'→'민국'은 Kiwi 가 대한민국을 단일 형태소(NNP)로 봐 '민국'이 형태소
+    경계에 없음 → 거부. '생명보험업'→'보험업'은 [생명, 보험업] 경계 일치 → 인정.
+    ⚠️ Kiwi 가 child 를 단일 형태소로 보면(고등학교) 접미가 경계에 없어 놓칠 수
+    있으나, 파편 노이즈('민국·국·업')가 그래프를 오염시키는 손해가 훨씬 크다
+    (노이즈 계층은 GraphRAG 가 그래프를 회피하게 만듦, B 축 A/B 실측 triples_used=0).
+    """
+    forms = [t.form for t in kiwi.tokenize(child)]
+    acc = ""
+    for f in reversed(forms):
+        acc = f + acc
+        if acc == parent:      # 형태소 경계에서 parent 와 정확 일치
+            return True
+        if len(acc) > len(parent):
+            break
+    return False
+
+
 def induce_suffix_hierarchy(class_names: set[str],
-                            min_children: int = MIN_CHILDREN) -> list[dict]:
+                            min_children: int = MIN_CHILDREN, *, kiwi=None) -> list[dict]:
     """클래스 집합에서 접미 공유 subClassOf 유도 (인덱스화 + 허브 필터, 한·영).
 
     child 가 parent 로 끝나고 더 길면 child subClassOf parent — 단, parent 가
@@ -83,6 +104,10 @@ def induce_suffix_hierarchy(class_names: set[str],
             for i in range(1, n - MIN_SUFFIX_LEN + 1):
                 parent = child[i:]
                 if parent in names and parent not in STOP_HEAD and parent not in STOP_HEAD_EN:
+                    # kiwi 주입 시 형태소 경계 검증 — '민국' 류 문자 파편 상위어 컷.
+                    # 원 표면형(names[child]/names[parent])으로 형태소 분석(소문자키 아님).
+                    if kiwi is not None and not _morph_suffix_ok(names[child], names[parent], kiwi):
+                        continue
                     parent_to_children[parent].add(child)
         # 순수 라틴 단일토큰: 문자 접미 생성 안 함 — 영어 단일단어는 형태소 경계가
         # 없어 placement⊂cement 류 오탐(0711 리뷰 실측). 공백형 다단어의 단어접미

@@ -48,6 +48,26 @@ def test_suffix_hub_filter():
     assert ("주주", "대주주") not in pairs  # 허브 미달(자식 1개)
 
 
+def test_suffix_morpheme_gate():
+    """형태소 경계 게이트(kiwi 주입) — 문자 파편 상위어 컷, 진짜 계층 보존.
+    mixed20k 실측: '대한민국'→'민국'은 파편(Kiwi 단일형태소)이라 컷,
+    '생명보험업'→'보험업'은 형태소 경계 일치라 보존. GraphRAG 그래프 회피 원인 제거."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.hierarchy.suffix_share import induce_suffix_hierarchy
+    kiwi = Kiwi()
+    names = {"문화재대한민국", "사람대한민국", "대한민국", "민국",
+             "생명보험업", "손해보험업", "보험업"}
+    pairs = {(h["parent"], h["child"]) for h in induce_suffix_hierarchy(names, kiwi=kiwi)}
+    # 파편 '민국' 상위어 전부 컷
+    assert not any(p == "민국" for p, _ in pairs), "문자 파편 '민국'이 상위어로 남음"
+    # 진짜 형태소 경계 계층은 보존
+    assert ("보험업", "생명보험업") in pairs
+    assert ("보험업", "손해보험업") in pairs
+
+
 def test_definitional_hierarchy_heterogeneous():
     """정의문 계층 — 접미공유가 원리적 불가한 이질계층(강아지⊂동물). extras[korean].
     외부 gold(Wikidata P279) 심판루프 89/100 검증 로직의 본체화."""
