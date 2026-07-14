@@ -256,3 +256,68 @@ def _suffix_variants(phrase: str, kiwi) -> list[str]:
         out.append("".join(xt[st:]))
     out.append(phrase)                     # 원 복합명사(가장 구체적)
     return out
+
+
+def assign_definitional_types(hearst_pairs: list[dict],
+                              all_entities: dict[str, list]) -> tuple[list[dict], list[dict], int]:
+    """정의문 주어가 NER 개체면 subClassOf 대신 **rdf:type**(ABox↔TBox 브리지).
+
+    본질 진단(0714): 계층 참여 클래스 13,441 중 인스턴스 도달 가능 0 — 계층과
+    개체가 완전 분리된 섬이라 GraphRAG 의 클래스→subClassOf*→인스턴스 leg 가
+    영구 공회전. 정의문("서울고등학교는 …고등학교이다")의 주어가 NER 개체면
+    그 상위어는 개체의 **타입**이지 클래스쌍이 아니다 — 개체-as-클래스 TBox
+    오염(동일명 중복 17.3% 실측)의 발생 지점을 타이핑으로 전환한다.
+
+    게이트 (심판 적대검증 판정):
+    - child 당 **최장 parent**(최상세)로 타이핑 — 더 일반적 상위어(공립고등학교
+      ⊂고등학교)는 접미공유 계층이 연결하므로 체인 보존.
+    - **NER 카테고리 다수결 정합**: 같은 parent 로 모인 개체들의 대분류 다수결과
+      일치하는 개체만 재타입(이탈리아어(기타) a 교황(인물다수) 류 부류 단위 컷).
+    - **parent⊂TTA 대분류는 ≥2 개체 합의** 시만 방출 — NER 오라벨 1건이 클래스
+      전칭공리(subClassOf)를 오염시키는 비용 구조 차단.
+
+    반환: (남은 클래스쌍(비개체 주어), parent⊂TTA대분류 쌍, 재타입 개체 수).
+    부수효과: 매칭 개체 dict 의 "class" in-place 갱신.
+    """
+    ent_by_norm: dict[str, list] = {}
+    for ents in all_entities.values():
+        for e in ents:
+            n = (e.get("entity") or "").replace(" ", "")
+            if n:
+                ent_by_norm.setdefault(n, []).append(e)
+
+    best_parent: dict[str, str] = {}   # 개체 child(norm) → 최장 parent
+    remaining: list[dict] = []
+    for hp in hearst_pairs:
+        cn = hp["child"].replace(" ", "")
+        if cn in ent_by_norm:
+            cur = best_parent.get(cn)
+            if cur is None or len(hp["parent"]) > len(cur):
+                best_parent[cn] = hp["parent"]
+        else:
+            remaining.append(hp)
+
+    by_parent: dict[str, list[tuple[str, str]]] = {}  # parent → [(child_norm, 대분류)]
+    for cn, parent in best_parent.items():
+        cats = [e.get("class", "") for e in ent_by_norm[cn] if e.get("class")]
+        coarse = max(set(cats), key=cats.count) if cats else ""
+        by_parent.setdefault(parent, []).append((cn, coarse))
+
+    tta_pairs: list[dict] = []
+    n_typed = 0
+    for parent in sorted(by_parent):          # 정렬 순회 — 결정적 출력
+        members = by_parent[parent]
+        cats = [c for _, c in members if c]
+        if not cats:
+            continue
+        major = max(sorted(set(cats)), key=cats.count)
+        for cn, coarse in members:
+            if coarse != major:
+                continue                       # 카테고리 부정합 — 재타입 보류
+            for e in ent_by_norm[cn]:
+                if e.get("class") == coarse:
+                    e["class"] = parent
+                    n_typed += 1
+        if sum(1 for _, c in members if c == major) >= 2:
+            tta_pairs.append({"child": parent, "parent": major})
+    return remaining, tta_pairs, n_typed

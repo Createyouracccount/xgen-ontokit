@@ -15,7 +15,7 @@ from typing import Optional
 
 from ..morphology.kiwi_nouns import KiwiNounExtractor
 from ..hierarchy.suffix_share import induce_suffix_hierarchy
-from ..hierarchy.hearst_ko import definitional_pairs
+from ..hierarchy.hearst_ko import definitional_pairs, assign_definitional_types
 from ..utils.lang_detect import detect_lang
 
 logger = logging.getLogger(__name__)
@@ -249,14 +249,31 @@ class DeterministicKoreanExtractor:
                 if self.enable_hearst and _HANGUL.search(text):
                     for hp in definitional_pairs(text, self.nouns.last_noun,
                                                  kiwi=self.nouns.kiwi):
+                        hp["_sc"] = sc  # child 클래스 승격은 NER 후로 유예(②")
                         hearst_pairs.append(hp)
-                        # 정의쌍의 클래스가 명사추출에 안 잡혔어도 존재 보장(+출처 청크)
-                        class_chunks.setdefault(hp["child"], set()).update(sc)
+                        # parent 는 항상 클래스(상위범주) — 존재 보장(+출처 청크).
+                        # child 는 NER 개체일 수 있어(개체-as-클래스 오염) 유예.
                         class_chunks.setdefault(hp["parent"], set()).update(sc)
 
         # ② NER → 인스턴스 엔티티 — 언어별 배치 forward 1회.
         self._run_ner_batched(self.ner, ko_ner_buf, all_entities)
         self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)
+
+        # ②" 정의문 인스턴스 타이핑 (ABox↔TBox 브리지) — 정의문 주어가 NER
+        #   개체면 subClassOf 대신 rdf:type. 본질 진단(0714): 계층 클래스 13,441
+        #   중 인스턴스 도달 0(완전 분리) → GraphRAG 계층 leg 영구 공회전 수복.
+        #   비개체 주어 쌍만 클래스 계층으로 잔류(+child 클래스 승격 재개).
+        hearst_tta_pairs: list[dict] = []
+        n_def_typed = 0
+        if hearst_pairs:
+            hearst_pairs, hearst_tta_pairs, n_def_typed = \
+                assign_definitional_types(hearst_pairs, all_entities)
+            for hp in hearst_pairs:
+                class_chunks.setdefault(hp["child"], set()).update(
+                    hp.pop("_sc", None) or [])
+            if n_def_typed:
+                logger.info("정의문 인스턴스 타이핑: 개체 %d건 재타입, TTA계층쌍 %d",
+                            n_def_typed, len(hearst_tta_pairs))
 
         # ③' 코퍼스레벨 관계추출(hybrid top-up) — 수집한 한국어 청크 1회 처리.
         #   예산 가드레일(청크% ∨ 달러)이 코퍼스 전체 기준으로 작동해 LLM-free 가치
@@ -283,6 +300,12 @@ class DeterministicKoreanExtractor:
             induce_suffix_hierarchy(set(class_chunks.keys()), kiwi=self.nouns.kiwi))
         if hearst_pairs:
             all_hier.extend(hearst_pairs)
+        if hearst_tta_pairs:
+            # 세밀타입클래스 ⊂ TTA대분류(고등학교⊂기관) — 대분류 상향 경로 보존
+            # (재타입으로 개체가 대분류에서 이탈해도 subClassOf* 로 도달 가능).
+            all_hier.extend(hearst_tta_pairs)
+            for hp in hearst_tta_pairs:
+                class_chunks.setdefault(hp["parent"], set())  # TTA 클래스 존재 보장
         # ⚠️pair 단위 dedup — existing 이어빌드 시 기존 hierarchy + 재유도 결과가 겹쳐
         # 패스마다 동일 pair 가 선형 증식(2→4→6, 0711 리뷰 실측)했고, 중복 pair 는
         # OWL disjoint 의 형제 리스트에 중복 URI 를 넣어 자기-disjoint(unsatisfiable)

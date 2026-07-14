@@ -162,6 +162,40 @@ def test_definitional_title_line_and_gates():
     assert not any(p["child"] == "일본" for p in pairs), "제목≠주어 오식별 잔존"
 
 
+def test_definitional_instance_typing():
+    """정의문 인스턴스 타이핑 (ABox↔TBox 브리지) — 주어가 NER 개체면 rdf:type.
+    본질 진단(0714): 계층 클래스 13,441 중 인스턴스 도달 0 → 계층 leg 공회전 수복.
+    게이트: 최장 parent·개체-as-클래스 미방출·TTA쌍 ≥2 합의(심판 판정)."""
+    try:
+        from ontokit import DeterministicKoreanExtractor
+    except ImportError:
+        pytest.skip("의존성 미설치")
+
+    class _MockNER:
+        def entities(self, text, *, source_chunks):
+            return [{"entity": s, "class": "기관", "type": "INSTANCE",
+                     "source_chunks": source_chunks}
+                    for s in ("서울고등학교", "부산고등학교") if s in text]
+    ext = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False)
+    docs = {"d": [
+        {"chunk_id": "c1", "chunk_text": "서울고등학교\n서울고등학교는 서울에 있는 공립고등학교이다."},
+        {"chunk_id": "c2", "chunk_text": "부산고등학교\n부산고등학교는 부산에 있는 공립고등학교이다."},
+        {"chunk_id": "c3", "chunk_text": "계란빵\n계란빵은 한국의 길거리 음식이다."},
+    ]}
+    concepts, ents, *_ = asyncio.run(ext.extract(docs))
+    # 개체 재타입: 기관 → 공립고등학교 (최장 parent)
+    flat = [e for es in ents.values() for e in es]
+    assert all(e["class"] == "공립고등학교" for e in flat), flat
+    names = {c["name"] for c in concepts["classes"]}
+    hier = {(h["child"], h["parent"]) for h in concepts["class_hierarchy"]}
+    # 개체-as-클래스 오염 없음 + 타입 클래스는 존재 + TTA 상향 계층(≥2 합의)
+    assert "서울고등학교" not in names
+    assert "공립고등학교" in names
+    assert ("공립고등학교", "기관") in hier
+    # 비개체 주어 정의쌍은 클래스 계층으로 잔류
+    assert ("계란빵", "음식") in hier
+
+
 def test_definitional_hierarchy_backcompat():
     """구 API 하위호환 — kiwi 미주입 시 따옴표 정의문 + last_noun_fn 폴백."""
     from ontokit.hierarchy.hearst_ko import definitional_pairs
