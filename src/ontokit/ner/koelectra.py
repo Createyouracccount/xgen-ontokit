@@ -33,6 +33,14 @@ TTA_LABEL_KO = {
 # 버렸다(0711 적대리뷰 MED). 1200자 초과분은 여전히 커버 밖(정직한 한계).
 MAX_NER_CHARS = 1200
 
+# 엔티티 최소 신뢰도. aggregation_strategy="simple" 은 저확신 오탐도 그대로 방출한다
+# (실측: "…대한민국의 전자 회사이다"의 수식어 '전자'가 OG score 0.28 로 통과 →
+#  관계 그래프에서 '삼성전자'와 별개 '전자' 노드로 파편화, e2e 빌드 검증서 적발).
+# 0.40 은 오탐만 컷하는 보수값 — 코퍼스 실측상 진짜 엔티티 최저가 0.50(메신저)이라
+# 0.40 미만은 사실상 오탐뿐. 정밀도 우선 원칙(파일 상단 주석)의 신뢰도 축 구현이다.
+# env ONTOKIT_NER_MIN_SCORE 로 조정(도메인별 재보정 가능).
+DEFAULT_MIN_SCORE = 0.40
+
 
 class KoElectraNER:
     """HF NER 파이프라인 래핑. 지연 로드(사용 안 하면 안 깔림)."""
@@ -42,6 +50,11 @@ class KoElectraNER:
     def __init__(self, model: Optional[str] = None, pipeline=None):
         self._pipe = pipeline
         self._model = model or self.DEFAULT_MODEL
+        import os
+        try:
+            self._min_score = float(os.getenv("ONTOKIT_NER_MIN_SCORE", DEFAULT_MIN_SCORE))
+        except ValueError:
+            self._min_score = DEFAULT_MIN_SCORE
         # 동시 빌드 2개가 같은 인스턴스를 서로 다른 to_thread 워커에서 쓸 때
         # HF fast tokenizer(Rust)의 "Already borrowed" 충돌·모델 이중 로드를 방지
         # (0711 적대리뷰 HIGH — factory 가 단일 인스턴스를 전 빌드에 공유).
@@ -59,7 +72,7 @@ class KoElectraNER:
         out = []
         for e in ents or []:
             w = (e.get("word", "") or "").replace("##", "").strip()
-            if len(w) >= 2:
+            if len(w) >= 2 and float(e.get("score", 1.0)) >= self._min_score:
                 g = e.get("entity_group", "ENTITY")
                 out.append({"entity": w, "class": TTA_LABEL_KO.get(g, g),
                             "type": "INSTANCE", "source_chunks": source_chunks})

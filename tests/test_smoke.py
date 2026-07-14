@@ -149,6 +149,25 @@ def test_relation_encoder_fallback_bad_path(monkeypatch):
     logging.disable(logging.NOTSET)
 
 
+def test_ner_score_gate(monkeypatch):
+    """NER 신뢰도 게이트 — 저확신 오탐(실측 '전자' 0.28)은 컷, 진짜 엔티티는 통과.
+    e2e 빌드서 적발한 '삼성전자'↔'전자' 그래프 파편화 방지. 모델 다운로드 없이
+    주입 파이프라인으로 검증."""
+    from ontokit.ner.koelectra import KoElectraNER
+    fake_out = [
+        {"word": "삼성전자", "entity_group": "OG", "score": 0.97},
+        {"word": "전자", "entity_group": "OG", "score": 0.28},   # 오탐(수식어)
+    ]
+    ner = KoElectraNER(pipeline=lambda *a, **k: fake_out)  # _ensure 스킵
+    ents = {e["entity"] for e in ner.entities("x", source_chunks=[])}
+    assert "삼성전자" in ents
+    assert "전자" not in ents, "저확신 오탐이 게이트를 통과함"
+    # env 로 게이트 완화 시 오탐도 통과(조정 가능성 확인)
+    monkeypatch.setenv("ONTOKIT_NER_MIN_SCORE", "0.0")
+    ner2 = KoElectraNER(pipeline=lambda *a, **k: fake_out)
+    assert "전자" in {e["entity"] for e in ner2.entities("x", source_chunks=[])}
+
+
 def test_relation_encoder_type_mapping():
     """modu-ner 클래스 → KLUE 타입 결정적 매핑 + typed marker 규약."""
     from ontokit.extractors.relation_encoder_ko import _klue_type, _mark
