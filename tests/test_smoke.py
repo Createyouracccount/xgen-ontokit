@@ -138,6 +138,30 @@ def test_definitional_hierarchy_gates():
     assert "주의" not in parents
 
 
+def test_definitional_title_line_and_gates():
+    """정의문 배관 수리 3종(심판 적대검증 반영) — 제목줄 스킵·EF판정·제목정합.
+    실측: 배관버그로 실빌드 2,000청크 정의쌍 1건(채널 전멸) → 수리+게이트 후
+    615건·정밀도 87%(n=100 홀드아웃 감사, 하한 0.85 통과)."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 없으면 skip")
+    from ontokit.hierarchy.hearst_ko import definitional_pairs
+    from ontokit.morphology.kiwi_nouns import KiwiNounExtractor
+    ne = KiwiNounExtractor(); kiwi = ne.kiwi
+    # ① 제목줄 스킵 — 백과형 "제목\n정의문" 에서 정의문을 봐야 함
+    pairs = definitional_pairs("연암대학교\n연암대학교는 천안시에 있는 사립 전문대학이다.",
+                               ne.last_noun, kiwi=kiwi)
+    assert any(p["parent"] == "전문대학" for p in pairs)
+    # ② EF 판정 — '다' 종결 표제어(람다)가 문장으로 오인되면 안 됨 (심판 1-A)
+    pairs = definitional_pairs("람다\n람다는 그리스 문자이다.", ne.last_noun, kiwi=kiwi)
+    assert any(p["parent"] in ("문자", "그리스문자") for p in pairs)
+    # ③ 제목-주어 정확일치 — 주어 오식별(다른 개체가 주어로 추출) 컷
+    pairs = definitional_pairs("히미코\n일본은 히미코가 다스린 고대 국가이다.",
+                               ne.last_noun, kiwi=kiwi)
+    assert not any(p["child"] == "일본" for p in pairs), "제목≠주어 오식별 잔존"
+
+
 def test_definitional_hierarchy_backcompat():
     """구 API 하위호환 — kiwi 미주입 시 따옴표 정의문 + last_noun_fn 폴백."""
     from ontokit.hierarchy.hearst_ko import definitional_pairs
