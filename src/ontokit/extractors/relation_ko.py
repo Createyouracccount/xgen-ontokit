@@ -205,7 +205,10 @@ class KoreanRelationExtractor:
                     # P0-2 실험: 공백 하나 건너 NN 이 이어지면 리셋 대신 공백 보존
                     # 연접("동방 지역"→'동방 지역'). 기존 리셋은 수식명사를 버려
                     # 파편 인자("지역")를 만들었다(R6 정크 지배 원인).
-                    if os.environ.get("ONTOKIT_NN_JOIN", "") == "1" and t.start == prev_end + 1:
+                    # 단 '의' 연결과 상호 배타(R7 심판 정제 조건) — 둘이 합성되면
+                    # "예수회 관할의프리타네 군사학교"류 성분 교차 유령이 생긴다.
+                    if (os.environ.get("ONTOKIT_NN_JOIN", "") == "1"
+                            and t.start == prev_end + 1 and "의" not in noun_buf):
                         noun_buf.append(" ")
                     else:
                         noun_buf = []
@@ -226,6 +229,12 @@ class KoreanRelationExtractor:
                 # 불변식 위반이므로 수용.
                 if "의" in noun_buf:
                     noun_buf = noun_buf[noun_buf.index("의") + 1:]
+                if " " in noun_buf:
+                    # '의' 연결 × 공백 연접 상호 배타(R7 심판 정제) — 공백 연접된
+                    # 버퍼에 '의'가 붙으면 마지막 세그먼트만 '의' 연쇄에 넘긴다
+                    # ("금강 주변 농지" + 의 → "농지의…", P0-2 이전 동작과 동일).
+                    noun_buf = noun_buf[len(noun_buf) - 1 - noun_buf[::-1].index(" "):]
+                    noun_buf = [x for x in noun_buf if x != " "]
                 noun_buf.append("의")
                 gen_active = True
                 prev_end = t.start + t.len
