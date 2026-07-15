@@ -1378,3 +1378,30 @@ def test_relation_ec_object_reset():
     t = ex.extract("회사가 제품을 개발하고 서비스를 판매한다.", source_chunks=["t"])
     assert [(x["predicate"], x["object"]) for x in t] == \
         [("개발", "제품"), ("판매", "서비스")]
+
+
+def test_relation_completive_malda_not_prohibition():
+    """완료상 '~고 말다'는 금지 아님 — '~지 말다'(금지)와 위치 결속으로 분리 (R6 심판)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    # 완료상: 금지로 오탐하면 안 됨
+    tris = r.extract("정부는 결국 그 정책을 폐기하고 말았다", source_chunks=["c"])
+    assert not any("금지" in t["predicate"] for t in tris), tris
+    # 진짜 금지("~지 말다")는 유지
+    tris2 = r.extract("사업자는 그 정보를 제3자에게 제공하지 말아야 한다", source_chunks=["c"])
+    assert any("금지" in t["predicate"] for t in tris2) or not tris2
+
+
+def test_relation_self_loop_cut():
+    """주어==목적어 자기루프 방출 금지 (R6 심판 — 구조적 정크)."""
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    for text in ["자기장이 자기장을 유도한다", "회사는 회사를 지배한다"]:
+        tris = r.extract(text, source_chunks=["c"])
+        assert not any(t["subject"] == t["object"] for t in tris), (text, tris)

@@ -129,7 +129,11 @@ class KoreanRelationExtractor:
             단 부정 뒤 '수 있'(…하지 아니할 수 있다=재량규정)은 금지 아님."""
             prev_form, neg = "", False
             for t in toks[i + 1:i + 10]:
-                hit = ((t.tag == "VX" and t.form in ("못하", "말"))
+                # '말'은 금지("~지 말다")일 때만 — 완료상 "~고 말다"(처형되고 만다)를
+                # 금지로 오탐하던 버그(R6 심판 적발). 선행 연결어미 '지'를 요구하는
+                # 위치 결속으로 분리(둘 다 폐집합 형태소, 어휘 지식 불요).
+                hit = ((t.tag == "VX" and (t.form == "못하"
+                                           or (t.form == "말" and prev_form == "지")))
                        or (t.tag == "MAG" and t.form == "아니")
                        or t.form in ("않", "아니하")
                        or (t.tag == "VA" and t.form == "없" and prev_form == "수"))
@@ -318,9 +322,12 @@ class KoreanRelationExtractor:
                                     obj = dat = ""
                                     dat_agent = False
                                 # 되+JKO: 되-피동은 대격 불가 — obj 는 구조적으로 이전
-                                # 절 잔류물. 되+처소 '에': 방향 중의(스왑 유효 ~5/8 但
-                                # 확신 불가) — 둘 다 방출 억제(정밀도 우선, 드롭 비용
-                                # ~20-30% 정보성 트리플 동반 소멸은 심판 기록 조건).
+                                # 절 잔류물 → 억제. 되+여격(에/에게): R6 에서 피동 표지
+                                # 보존 방출((주어, 술어됨, 여격) — 방향 중의 회피)을
+                                # 실측했으나 블라인드 합의유효 28%(정크 지배 원인은
+                                # 명사구 연접 미비의 인자 파편) → 심판 판정 "설계는
+                                # 옳으나 시기상조, P0-2(명사구 연접) 선행 후 재도전".
+                                # 그때까지 억제 유지(유효손실 ~96건 기록 조건 유지).
                                 else:
                                     obj = dat = ""
                             elif form in ("받", "당하"):
@@ -424,6 +431,10 @@ class KoreanRelationExtractor:
                 carry_neg = bool(re.search(r"(아니\s?된다|못한다|수\s?없다)", sent))
                 carry_pred = pending
             for tri in tris:
+                if tri["subject"] == tri["object"]:
+                    # 자기루프 컷(R6 심판) — "자기장 표시됨 자기장"류. 주어==목적어
+                    # 관계는 조사 재부착/절 잔류물의 구조적 산물로 유효 사례 실측 0.
+                    continue
                 key = (tri["subject"], tri["predicate"], tri["object"])
                 if key in seen:
                     continue
