@@ -1405,3 +1405,23 @@ def test_relation_self_loop_cut():
     for text in ["자기장이 자기장을 유도한다", "회사는 회사를 지배한다"]:
         tris = r.extract(text, source_chunks=["c"])
         assert not any(t["subject"] == t["object"] for t in tris), (text, tris)
+
+
+def test_relation_nn_join_toggle():
+    """P0-2 공백 보존 NN 연접 — ONTOKIT_NN_JOIN=1 일 때만(기본 off, R7 심판 opt-in 채택)."""
+    import os
+    try:
+        from ontokit.extractors.relation_ko import KoreanRelationExtractor
+        r = KoreanRelationExtractor()
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    sent = "항공기가 후쿠오카 공항에 착륙했다"
+    os.environ.pop("ONTOKIT_NN_JOIN", None)
+    base = r.extract(sent, source_chunks=["c"])
+    assert any(t["object"] == "공항" for t in base), base   # 기존: 파편
+    os.environ["ONTOKIT_NN_JOIN"] = "1"
+    try:
+        joined = r.extract(sent, source_chunks=["c"])
+        assert any(t["object"] == "후쿠오카 공항" for t in joined), joined
+    finally:
+        os.environ.pop("ONTOKIT_NN_JOIN", None)
