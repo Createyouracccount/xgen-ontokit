@@ -1346,3 +1346,35 @@ def test_english_ner_misc_and_junk_gates():
     out = ner._to_dicts(fake, ["c1"])
     got = {(d["entity"], d["class"]) for d in out}
     assert got == {("Obama", "인물"), ("London", "지역"), ("UN", "기관")}, got
+
+
+def test_relation_passive_three_way():
+    """P0-1 피동 3분기(0715 심판 조건부 채택) — '에 의해' 행위자는 능동 스왑,
+    되+처소/대격은 방출 억제, 받/당하는 접사 보존 방출."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.extractors.relation_ko import KoreanRelationExtractor
+    ex = KoreanRelationExtractor()
+    t = ex.extract("독립신문은 유길준에 의해 창간되었다.", source_chunks=["t"])
+    assert [(x["subject"], x["predicate"], x["object"]) for x in t] == \
+        [("유길준", "창간", "독립신문")]
+    assert ex.extract("자민련이 한나라당에 흡수되었다.", source_chunks=["t"]) == []
+    t = ex.extract("김용남은 징역을 선고받았다.", source_chunks=["t"])
+    assert t and (t[0]["predicate"], t[0]["object"]) == ("선고받음", "징역")
+
+
+def test_relation_ec_object_reset():
+    """P0-3(0715 심판 채택) — 절 경계(EC)에서 목적어 잔류물 리셋: 비방출 용언을
+    건너뛴 obj 오귀속 차단. 능동 접속문(각 절이 자기 목적어)은 무손실."""
+    try:
+        import kiwipiepy  # noqa
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.extractors.relation_ko import KoreanRelationExtractor
+    ex = KoreanRelationExtractor()
+    assert ex.extract("비미호가 사신을 보내 봉헌하였다.", source_chunks=["t"]) == []
+    t = ex.extract("회사가 제품을 개발하고 서비스를 판매한다.", source_chunks=["t"])
+    assert [(x["predicate"], x["object"]) for x in t] == \
+        [("개발", "제품"), ("판매", "서비스")]

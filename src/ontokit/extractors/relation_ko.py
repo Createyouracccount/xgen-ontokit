@@ -110,6 +110,10 @@ class KoreanRelationExtractor:
         # 캐리 주어는 '추정'(subject_used=True) — 트리플에 inferred_subject 태깅됨
         subject, subject_used = (init_subject, True) if init_subject else ("", False)
         obj = dat = ""
+        # P0-1(0715 심판): dat 이 '에 의해' 행위자구인지 — JKB 직후 의하/VV 인접
+        # *위치 결속*으로만 참(문장 부분문자열 검사 금지 — dat 이 다른 '에'에 결속된
+        # 케이스 4~6/19 실측, 스왑 FP 원인). 피동(되/XSV)에서 방향 스왑 트리거.
+        dat_agent = False
         noun_buf: list[str] = []
         out: list[dict] = []
         prev_end: int | None = None
@@ -290,13 +294,43 @@ class KoreanRelationExtractor:
                 if cand:
                     dat = cand
                     last_role = "dat"
+                    # P0-1: JKB *바로 뒤* 의하/VV = 명시적 행위자구("X에 의해").
+                    # 인접 위치 결속 — 문장 어딘가의 '에 의해'로 판정하면 안 됨(심판 B).
+                    nxt = toks[i + 1] if i + 1 < n else None
+                    dat_agent = nxt is not None and nxt.tag == "VV" and nxt.form == "의하"
             elif tag == "XSV":                               # 명사+하/되/시키 술어
                 if noun_buf:
                     pred_cand = noun_buf[-1]
                     if 2 <= len(pred_cand) <= 20 and pred_cand not in STOP_HEAD \
                             and _HANGUL.fullmatch(pred_cand):
                         if not is_adnominal(i):
-                            if not emit(pred_cand, i):
+                            # P0-1 피동 3분기(0715 심판 조건부 채택) — 되/받/당하는
+                            # 태(voice) 표지인데 무시되어 방향 오류가 무효의 최다
+                            # 단일 유형이었다(ctrl 6/28 실측). 전부 폐집합 형태소.
+                            if form == "되":
+                                if dat and dat_agent and subject:
+                                    # "S가 O에 의해 V되다" → 능동 (O, V, S) 스왑 방출.
+                                    # 잔여 FP(근거/수단형 "규정에 의해") 10~20% 실측 —
+                                    # 현행 100% 방향오류 대비 순개선으로 수용(심판 B).
+                                    p = pred_cand + (" 금지" if neg_after(i) else "")
+                                    out.append({"subject": dat, "predicate": p,
+                                                "object": subject})
+                                    obj = dat = ""
+                                    dat_agent = False
+                                # 되+JKO: 되-피동은 대격 불가 — obj 는 구조적으로 이전
+                                # 절 잔류물. 되+처소 '에': 방향 중의(스왑 유효 ~5/8 但
+                                # 확신 불가) — 둘 다 방출 억제(정밀도 우선, 드롭 비용
+                                # ~20-30% 정보성 트리플 동반 소멸은 심판 기록 조건).
+                                else:
+                                    obj = dat = ""
+                            elif form in ("받", "당하"):
+                                # 수동 수혜/피해: 관계는 참, 술어만 왜곡 — 피동 접사를
+                                # 보존해 방출(선고받음/점령당함). 어휘 지식 불요.
+                                sfx = "받음" if form == "받" else "당함"
+                                if not emit(pred_cand + sfx, i):
+                                    pending_pred = pred_cand + sfx + (
+                                        " 금지" if neg_after(i) else "")
+                            elif not emit(pred_cand, i):
                                 pending_pred = pred_cand + (" 금지" if neg_after(i) else "")
                         # 관형절 문맥 복원은 ETM 분기에서 일괄 처리
                 last_role = None
@@ -326,7 +360,23 @@ class KoreanRelationExtractor:
                         adn_anchor = dat   # "…에 종사하는 자는" 주어 앵커(⑨)
                     dat = obj = ""
             elif tag == "EC":
-                pass  # 연결어미 — last_role 유지("에 관하여는"의 '어')
+                # P0-3(0715 심판 채택): 절 경계에서 목적어 잔류물 차단 — 비방출
+                # 용언을 건너뛴 obj 가 다음 술어에 오귀속되던 누출("사신을 보내
+                # 봉헌" → 봉헌의 목적어=사신)이 무효 최다 복합유형(ctrl 12/28).
+                # 리셋 조건: EC 직전(선어말어미 EP 통과)이 *실질동사 VV* 일 때만 —
+                # 그 동사가 obj 의 주인인데 방출 없이 절이 닫힌 경우다. 무조건
+                # 리셋하면 부사화 EC("부당하'게' 소멸시켜서는")가 정당한 obj 를
+                # 파괴한다(스모크 실측 회귀 → 조건 정밀화). 목적어 공유 접속문
+                # ("개발하고 판매")은 emit 이 이미 obj 를 리셋해 비용 ≈0(심판 D).
+                # ⚠️ dat 은 유지 — '에 의해'(의하/VV+어/EC)·'에 관하여'(FUNC_VV+EC)
+                # 경로가 EC 를 통과하므로 dat 리셋은 P0-1·④주제승격 파괴(심판 적발).
+                j = i - 1
+                while j >= 0 and toks[j].tag == "EP":
+                    j -= 1
+                if (j >= 0 and toks[j].tag == "VV"
+                        and toks[j].form not in _AUX_VV
+                        and toks[j].form not in _FUNC_VV):
+                    obj = ""
             else:
                 last_role = None
             noun_buf = []
