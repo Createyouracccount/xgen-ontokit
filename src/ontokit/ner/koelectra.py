@@ -74,8 +74,11 @@ class KoElectraNER:
             w = (e.get("word", "") or "").replace("##", "").strip()
             if len(w) >= 2 and float(e.get("score", 1.0)) >= self._min_score:
                 g = e.get("entity_group", "ENTITY")
+                # start/end 오프셋 보존 (R13) — 스팬-형태소 경계 정렬·윈도우 dedup 의
+                # 선결 재료. HF 파이프라인이 주는 원문 문자 오프셋 그대로.
                 out.append({"entity": w, "class": TTA_LABEL_KO.get(g, g),
-                            "type": "INSTANCE", "source_chunks": source_chunks})
+                            "type": "INSTANCE", "source_chunks": source_chunks,
+                            "start": e.get("start"), "end": e.get("end")})
         return out
 
     def entities(self, text: str, *, source_chunks: list[str],

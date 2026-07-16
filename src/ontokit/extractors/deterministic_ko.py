@@ -110,7 +110,7 @@ class DeterministicKoreanExtractor:
 
     @staticmethod
     def _run_ner_batched(ner, buf: list[tuple[str, str, list]],
-                         all_entities: dict[str, list]) -> None:
+                         all_entities: dict[str, list], kiwi=None) -> None:
         """수집된 (doc_name, text, sc) 버퍼를 배치 NER 로 추론해 all_entities 에 병합.
 
         entities_batch 미구현 NER(커스텀 주입)은 청크별 entities() 폴백 — 결과 동일,
@@ -129,8 +129,15 @@ class DeterministicKoreanExtractor:
                            for t, sc in zip(texts, scs)]
         else:
             results = [ner.entities(t, source_chunks=sc) for t, sc in zip(texts, scs)]
-        for (doc_name, _, _), ents in zip(buf, results):
+        for (doc_name, text, _), ents in zip(buf, results):
             if ents:
+                # R13-2 스팬-형태소 경계 정렬 + 인접 인명 병합 — 토큰 중간 절단
+                # ('진양호'→'진양')·인명 분절 회수. kiwi 미주입 시 원본 그대로.
+                try:
+                    from ontokit.ner.span_align import align_spans
+                    ents = align_spans(text[:1200], ents, kiwi)
+                except Exception:
+                    pass
                 all_entities.setdefault(doc_name, []).extend(ents)
 
     async def extract(
@@ -256,8 +263,8 @@ class DeterministicKoreanExtractor:
                         class_chunks.setdefault(hp["parent"], set()).update(sc)
 
         # ② NER → 인스턴스 엔티티 — 언어별 배치 forward 1회.
-        self._run_ner_batched(self.ner, ko_ner_buf, all_entities)
-        self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)
+        self._run_ner_batched(self.ner, ko_ner_buf, all_entities, kiwi=self.nouns.kiwi)
+        self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)  # 영어는 정렬 비적용
 
         # ②' 라벨 위생 게이트 (R11 T4) — 파편 라벨('는 신화다'·'이소라 이소'·'프랑스와')
         #   을 폐집합 문법 판정으로 드랍. 그래프 오염의 M2 오탐 유형 1위가 추출 파편.

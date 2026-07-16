@@ -1482,3 +1482,43 @@ def test_definitional_parent_entity_as_class_gate():
     pairs = [{"child": "광주", "parent": "광주광역시"}]
     _rem, _tta, n = assign_definitional_types(pairs, ents)
     assert n == 0 and ents["d"][0]["class"] == "지역"
+
+
+def test_span_align_recovers_and_no_false_join():
+    """R13-2 — 토큰 중간 절단 회수·인명 병합, '한국 측/서울 역' 오결합 없음."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.ner.span_align import align_spans
+    kiwi = Kiwi()
+    text = "진양호는 아름답다."
+    ents = [{"entity": "진양", "class": "지역", "start": 0, "end": 2}]
+    out = align_spans(text, ents, kiwi)
+    assert out[0]["entity"] == "진양호"
+    text2 = "한국 측이 발표했다."
+    ents2 = [{"entity": "한국", "class": "지역", "start": 0, "end": 2}]
+    assert align_spans(text2, ents2, kiwi)[0]["entity"] == "한국"
+    text3 = "앨버트 마이컬슨은 물리학자다."
+    ents3 = [{"entity": "앨버트", "class": "인물", "start": 0, "end": 3},
+             {"entity": "마이컬슨", "class": "인물", "start": 4, "end": 8}]
+    assert align_spans(text3, ents3, kiwi)[0]["entity"] == "앨버트 마이컬슨"
+
+
+def test_span_align_wired_in_extractor():
+    """R13-2 배선 검증 — staticmethod 에 kiwi 전달(무성 no-op 회귀 방지)."""
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+
+    class FakeNER:
+        def entities(self, text, *, source_chunks):
+            return [{"entity": "진양", "class": "지역", "type": "INSTANCE",
+                     "source_chunks": source_chunks, "start": 0, "end": 2}]
+    ex = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
+                                      auto_english=False, enable_hearst=False)
+    out: dict = {}
+    ex._run_ner_batched(FakeNER(), [("d", "진양호는 아름답다.", [])], out, kiwi=ex.nouns.kiwi)
+    assert out["d"][0]["entity"] == "진양호"
