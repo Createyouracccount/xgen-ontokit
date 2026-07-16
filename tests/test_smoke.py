@@ -1425,3 +1425,26 @@ def test_relation_nn_join_toggle():
         assert any(t["object"] == "후쿠오카 공항" for t in joined), joined
     finally:
         os.environ.pop("ONTOKIT_NN_JOIN", None)
+
+
+def test_class_synonym_candidates_gates(tmp_path):
+    """클래스 동의어 후보 생성 — deny 게이트(substr/ambig/hub/zero) 동작 (R9)."""
+    from ontokit.dedup.synonym_dict import SynonymDictDedup
+    from ontokit.dedup.class_synonyms import class_synonym_candidates
+    tsv = tmp_path / "syn.tsv"
+    tsv.write_text(
+        "국가\t나라003\n나라\t나라003\n"          # 정상 후보
+        "성우\t유성우001\n유성우\t유성우001\n"     # substr deny
+        "사상\t사상001 사상002\n사건\t사상001\n"   # ambig deny(사상 다의)
+        "역사서\t역사서001\n역사책\t역사서001\n",  # zero deny(양쪽 0)
+        encoding="utf-8")
+    d = SynonymDictDedup(tsv_path=str(tsv))
+    cands = class_synonym_candidates(
+        {"국가": 7, "나라": 5, "성우": 1, "유성우": 5, "사상": 1, "사건": 900,
+         "역사서": 0, "역사책": 0}, d)
+    by = {(c["a"], c["b"]): c["deny"] for c in cands}
+    assert by[("국가", "나라")] == []
+    assert "substr" in by[("성우", "유성우")]
+    assert "ambig" in by[("사건", "사상")]
+    assert "zero" in by[("역사서", "역사책")]
+    assert cands[0]["deny"] == []  # 정렬: 클린 후보 우선
