@@ -1448,3 +1448,37 @@ def test_class_synonym_candidates_gates(tmp_path):
     assert "ambig" in by[("사건", "사상")]
     assert "zero" in by[("역사서", "역사책")]
     assert cands[0]["deny"] == []  # 정렬: 클린 후보 우선
+
+
+def test_label_hygiene_gate():
+    """R11 T4 — 파편 라벨 컷, 정상 라벨 통과 (실측 파편 케이스)."""
+    from ontokit.instance_typing import label_ok
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    kiwi = Kiwi()
+    for bad in ("는 신화다", "이소라 이소", "프랑스와", "이"):
+        assert not label_ok(bad, kiwi), bad
+    for good in ("대한민국", "열린우리당", "브라운슈바이크 공국", "서울대학교", "이소라", "COVID-19"):
+        assert label_ok(good, kiwi), good
+
+
+def test_definitional_parent_by_evidence_frequency():
+    """R11 T0 — 최장-parent 폐기: 다수 증거 parent 가 쓰레기 1건(더 긴 라벨)을 이긴다."""
+    from ontokit.hierarchy.hearst_ko import assign_definitional_types
+    ents = {"d": [{"entity": "대한민국", "class": "지역"}]}
+    pairs = ([{"child": "대한민국", "parent": "국가"}] * 3
+             + [{"child": "대한민국", "parent": "시킴지역"}])
+    remaining, _tta, n = assign_definitional_types(pairs, ents)
+    assert n == 1 and ents["d"][0]["class"] == "국가"
+
+
+def test_definitional_parent_entity_as_class_gate():
+    """R11 T0 — 개체-as-클래스 parent(자식 1) 컷: '광주' rdf:type '광주광역시' 차단."""
+    from ontokit.hierarchy.hearst_ko import assign_definitional_types
+    ents = {"d": [{"entity": "광주", "class": "지역"},
+                  {"entity": "광주광역시", "class": "지역"}]}
+    pairs = [{"child": "광주", "parent": "광주광역시"}]
+    _rem, _tta, n = assign_definitional_types(pairs, ents)
+    assert n == 0 and ents["d"][0]["class"] == "지역"

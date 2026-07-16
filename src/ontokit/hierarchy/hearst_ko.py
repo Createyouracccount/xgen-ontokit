@@ -286,22 +286,38 @@ def assign_definitional_types(hearst_pairs: list[dict],
             if n:
                 ent_by_norm.setdefault(n, []).append(e)
 
-    best_parent: dict[str, str] = {}   # 개체 child(norm) → 최장 parent
+    # child 당 parent 선택 = **증거 빈도 최다, 동률 시에만 최장** (R11 T0).
+    # 이전 "최장 parent(최상세)" 규칙은 오추출 pair 1건(시킴지역, 4자)이 다수 증거의
+    # 올바른 타입(국가, 2자)을 이기는 역설을 낳았다(mixed20k 오염 500건 실측).
+    pair_freq: dict[tuple[str, str], int] = {}
     remaining: list[dict] = []
     for hp in hearst_pairs:
         cn = hp["child"].replace(" ", "")
         if cn in ent_by_norm:
-            cur = best_parent.get(cn)
-            if cur is None or len(hp["parent"]) > len(cur):
-                best_parent[cn] = hp["parent"]
+            pair_freq[(cn, hp["parent"])] = pair_freq.get((cn, hp["parent"]), 0) + 1
         else:
             remaining.append(hp)
+    best_parent: dict[str, str] = {}   # 개체 child(norm) → 증거빈도 최다 parent
+    for (cn, parent), freq in pair_freq.items():
+        cur = best_parent.get(cn)
+        if cur is None:
+            best_parent[cn] = parent
+            continue
+        cf = pair_freq[(cn, cur)]
+        if (freq, len(parent), parent) > (cf, len(cur), cur):  # 마지막 키=결정적 tie-break
+            best_parent[cn] = parent
 
     by_parent: dict[str, list[tuple[str, str]]] = {}  # parent → [(child_norm, 대분류)]
     for cn, parent in best_parent.items():
         cats = [e.get("class", "") for e in ent_by_norm[cn] if e.get("class")]
         coarse = max(set(cats), key=cats.count) if cats else ""
         by_parent.setdefault(parent, []).append((cn, coarse))
+
+    # parent 정합성 게이트 (R11 T0) — parent 가 NER **개체명**과 동일하면 개체-as-클래스
+    # 오염('광주' rdf:type '광주광역시' 실측). 단 진짜 범주는 서로 다른 child 를 여럿
+    # 모으므로, 개체명 parent 라도 자식 ≥2 면 구제(광주광역시류 FP 는 자기 관련 1건뿐).
+    by_parent = {p: m for p, m in by_parent.items()
+                 if not (p.replace(" ", "") in ent_by_norm and len({cn for cn, _ in m}) < 2)}
 
     tta_pairs: list[dict] = []
     n_typed = 0

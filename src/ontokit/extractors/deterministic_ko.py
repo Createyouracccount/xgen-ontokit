@@ -259,6 +259,18 @@ class DeterministicKoreanExtractor:
         self._run_ner_batched(self.ner, ko_ner_buf, all_entities)
         self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)
 
+        # ②' 라벨 위생 게이트 (R11 T4) — 파편 라벨('는 신화다'·'이소라 이소'·'프랑스와')
+        #   을 폐집합 문법 판정으로 드랍. 그래프 오염의 M2 오탐 유형 1위가 추출 파편.
+        from ontokit.instance_typing import label_ok
+        _kw = self.nouns.kiwi
+        n_dropped = 0
+        for _doc, _ents in all_entities.items():
+            kept = [e for e in _ents if label_ok(e.get("entity", ""), _kw)]
+            n_dropped += len(_ents) - len(kept)
+            _ents[:] = kept
+        if n_dropped:
+            logger.info("라벨 위생 게이트: 파편 %d건 드랍", n_dropped)
+
         # ②" 정의문 인스턴스 타이핑 (ABox↔TBox 브리지) — 정의문 주어가 NER
         #   개체면 subClassOf 대신 rdf:type. 본질 진단(0714): 계층 클래스 13,441
         #   중 인스턴스 도달 0(완전 분리) → GraphRAG 계층 leg 영구 공회전 수복.
