@@ -1499,10 +1499,11 @@ def test_span_align_recovers_and_no_false_join():
     text2 = "한국 측이 발표했다."
     ents2 = [{"entity": "한국", "class": "지역", "start": 0, "end": 2}]
     assert align_spans(text2, ents2, kiwi)[0]["entity"] == "한국"
-    text3 = "앨버트 마이컬슨은 물리학자다."
-    ents3 = [{"entity": "앨버트", "class": "인물", "start": 0, "end": 3},
-             {"entity": "마이컬슨", "class": "인물", "start": 4, "end": 8}]
-    assert align_spans(text3, ents3, kiwi)[0]["entity"] == "앨버트 마이컬슨"
+    # 인명 병합은 G-A 오결합 실증으로 제거 — 분리 유지 확인
+    text3 = "데릭 로 마크 뷰릭이 등판했다."
+    ents3 = [{"entity": "데릭 로", "class": "인물", "start": 0, "end": 4},
+             {"entity": "마크 뷰릭", "class": "인물", "start": 5, "end": 10}]
+    assert len(align_spans(text3, ents3, kiwi)) == 2
 
 
 def test_span_align_wired_in_extractor():
@@ -1522,3 +1523,23 @@ def test_span_align_wired_in_extractor():
     out: dict = {}
     ex._run_ner_batched(FakeNER(), [("d", "진양호는 아름답다.", [])], out, kiwi=ex.nouns.kiwi)
     assert out["d"][0]["entity"] == "진양호"
+
+
+def test_ner_two_pass_covers_tail(monkeypatch):
+    """R13-1 — 1200자 초과 청크 후반부 개체 회수(2패스), env 0 이면 미실행."""
+    from ontokit.ner.koelectra import KoElectraNER
+
+    calls = []
+    def fake_pipe(text):
+        calls.append(text)
+        if "후반개체" in text:
+            return [{"word": "후반개체", "score": 0.9, "entity_group": "OG", "start": 0, "end": 4}]
+        return [{"word": "전반개체", "score": 0.9, "entity_group": "OG", "start": 0, "end": 4}]
+    ner = KoElectraNER(pipeline=fake_pipe)
+    text = ("가" * 1300) + " 후반개체 등장"
+    out = ner.entities(text, source_chunks=[])  # 기본 off (G-A 파편 실증)
+    assert {e["entity"] for e in out} == {"전반개체"} and len(calls) == 1
+    calls.clear()
+    monkeypatch.setenv("ONTOKIT_NER_TWO_PASS", "1")
+    out2 = ner.entities(text, source_chunks=[])
+    assert {e["entity"] for e in out2} == {"전반개체", "후반개체"} and len(calls) == 2

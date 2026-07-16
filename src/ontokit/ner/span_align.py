@@ -4,8 +4,7 @@
 - 토큰 중간 절단: '찰스턴'→'찰스', '진양호'→'진양' — NER 서브워드 경계가 Kiwi
   토큰 중간에서 끊김 → **토큰 끝까지 확장**. '한국측/서울역' 오결합 없음(스팬이
   완전한 토큰 경계에서 끝나면 미확장 — 측/역은 별도 토큰).
-- 인명 분절: '앨버트'+'에이브러햄 마이컬슨' — 공백 1개 이내 인접한 동클래스(인물)
-  스팬 병합.
+- (기각) 인명 병합은 G-A 채점에서 인명 나열 오결합 실증 — 제거.
 """
 from __future__ import annotations
 
@@ -32,15 +31,7 @@ def align_spans(text: str, ents: list[dict], kiwi=None) -> list[dict]:
                         e = dict(e, entity=ext, end=te)
                     break
         out.append(e)
-    # 인접 동클래스 인명 병합: 공백 1개 이내 연속 (앨버트 + 에이브러햄 마이컬슨)
-    merged: list[dict] = []
-    for e in out:
-        if (merged and e.get("class") == "인물" and merged[-1].get("class") == "인물"
-                and isinstance(e.get("start"), int) and isinstance(merged[-1].get("end"), int)
-                and 0 <= e["start"] - merged[-1]["end"] <= 1):
-            prev = merged[-1]
-            merged[-1] = dict(prev, entity=(prev["entity"] + " " + e["entity"]).strip(),
-                              end=e.get("end"))
-        else:
-            merged.append(e)
-    return merged
+    # (제거됨, 0717 G-A) 인접 인명 병합은 나열된 서로 다른 인물을 오결합
+    # ('R.A.디키'+'놀런', '데릭 로'+'마크' — 블라인드 2인 실증). 공백 인접만으로는
+    # 단일 인명과 인명 나열을 구분 불가 — 판별 기제 없이 재도입 금지.
+    return out

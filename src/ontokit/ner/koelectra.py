@@ -90,7 +90,26 @@ class KoElectraNER:
         except Exception:
             logger.warning("NER 단건 추론 실패 — 해당 청크 엔티티 생략", exc_info=True)
             return []
-        return self._to_dicts(ents, source_chunks)
+        out = self._to_dicts(ents, source_chunks)
+        # R13-1 경량 2패스 — max_len 초과 청크의 후반부(절단 사각) 1회 추가 추론.
+        # 실측: 미탐 GT 112표본에서 2패스가 +17건 회수(전반부만은 +8). 문자열 기준
+        # union(오프셋은 전반부 기준만 유효 — 후반부 방출분은 오프셋 무효화).
+        # 기본 off (0717 G-A): 후반부는 표·참고문헌 잔재 구간이라 파편 다발
+        # ('년 4월 27일'·'urse' — 블라인드 2인 오탐 40~61% 실증). GT 회수 +17건의
+        # 가치는 실재하므로 위생 게이트 결합·재채점 후 재판정 — 그 전까지 opt-in.
+        import os
+        if len(text) > max_len and os.getenv("ONTOKIT_NER_TWO_PASS", "0") == "1":
+            try:
+                with self._lock:
+                    tail = self._pipe(text[max_len:max_len * 2])
+                seen = {e["entity"] for e in out}
+                for e in self._to_dicts(tail, source_chunks):
+                    if e["entity"] not in seen:
+                        e["start"] = e["end"] = None  # 후반부 오프셋은 전문 기준 아님
+                        out.append(e)
+            except Exception:
+                pass  # 후반부 실패는 비치명 — 전반부 결과 유지
+        return out
 
     def entities_batch(self, texts: list[str], *, source_chunks_list: list[list[str]],
                        max_len: int = MAX_NER_CHARS, batch_size: int = 32) -> list[list[dict]]:
