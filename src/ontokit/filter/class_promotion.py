@@ -57,7 +57,7 @@ DEFAULT_GATE_MIN_CHUNKS = 5000
 @dataclass
 class PromotionDecision:
     keep: bool
-    reason: str  # "" | gate | repeat | shape | relhead | deictic | overjoin
+    reason: str  # "" | gate | repeat | shape | relhead | deictic | overjoin | person
 
 
 class ClassPromotionFilter:
@@ -121,11 +121,31 @@ class ClassPromotionFilter:
         except Exception:
             return None
 
+    def _wordnet_common_noun(self, label: str) -> bool:
+        """라틴 라벨의 WordNet 보통명사(비인스턴스 synset) 존재 — wordnet 부재 시 False."""
+        try:
+            from nltk.corpus import wordnet
+            ss = wordnet.synsets(label.replace(" ", "_"), pos=wordnet.NOUN)
+            return any(not s.instance_hypernyms() for s in ss)
+        except Exception:
+            return False
+
     def decide(self, label: str, *, df: int = 1, has_rel: bool = False,
-               has_kid: bool = False, has_inst: bool = False) -> PromotionDecision:
+               has_kid: bool = False, has_inst: bool = False,
+               person_dom: bool = False) -> PromotionDecision:
+        """person_dom (R15): 같은 그래프에서 이 라벨의 인스턴스들이 NER 공유클래스
+        '인물'로 지배 타이핑됨(인물 수 > 타 공유클래스 합) — 인명은 클래스가 아니라
+        인스턴스여야 하므로 승격 기각. 호출측 규약: **자식 클래스 ≥2 구제를 넷팅한
+        뒤 True 를 넘길 것** (T0 개체-as-클래스 게이트 전례). 라틴 라벨의 WordNet
+        보통명사 구제(Sunday·Viscount 류)는 내부 처리. 블라인드 2인 n=250 합의
+        오살 2.1% (Wilson 상단 4.8%) 게이트 통과 — 단 층화표본 하한이며 한글 순수
+        보통명사(도로·오라토리오류)는 구제 불가로 꼬리 잔존(공시)."""
         label = (label or "").strip()
         if not label:
             return PromotionDecision(False, "shape")
+        if person_dom and not (
+                not _HANGUL.search(label) and self._wordnet_common_noun(label)):
+            return PromotionDecision(False, "person")
 
         # ① 지지도 게이트 — 고립(단일 출처 + 무구조) 라벨은 클래스 부적격.
         # 구조 = 관계 참여 ∨ 계층 부모 ∨ 인스턴스 보유(지우면 고아 인스턴스 발생).

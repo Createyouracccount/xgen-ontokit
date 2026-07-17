@@ -1036,6 +1036,22 @@ def test_class_promotion_instance_holder_survives():
     assert f.decide("희귀유형", df=1, has_inst=True).keep
 
 
+def test_class_promotion_person_dom_gate():
+    """R15 — 인물-지배 라벨은 클래스 승격 기각, 라틴 WordNet 보통명사는 구제."""
+    from ontokit.filter.class_promotion import ClassPromotionFilter
+    f = ClassPromotionFilter(corpus_chunks=20000)
+    assert f.decide("소크라테스", df=5, person_dom=True).reason == "person"
+    assert f.decide("Steve Jobs", df=5, person_dom=True).reason == "person"
+    assert f.decide("소크라테스", df=5).keep  # 신호 없으면 기존 동작 불변
+    try:
+        from nltk.corpus import wordnet
+        wordnet.synsets("sunday")
+    except Exception:
+        import pytest; pytest.skip("wordnet 미설치")
+    assert f.decide("Sunday", df=5, person_dom=True).keep      # 보통명사 구제
+    assert f.decide("Viscount", df=5, person_dom=True).keep
+
+
 def test_cooccurrence_selection():
     """통계 선별 — pair df·lift 만으로 우연쌍·허브쌍 배제 (목록 0)."""
     from ontokit.cooccurrence import CooccurrenceCollector
