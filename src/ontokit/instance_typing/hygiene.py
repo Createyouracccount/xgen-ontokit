@@ -24,9 +24,9 @@ def label_ok(label: str, kiwi=None) -> bool:
     if not label or len(label.replace(" ", "")) < 2:
         return False
     words = [w for w in _WS.split(label.strip()) if w]
-    # 절단 중복: 인접 어절이 서로의 진접두 ('이소라 이소')
+    # 절단 중복: 인접 어절이 서로의 접두 — 진접두('이소라 이소') + 동일 반복('가능역 가능역', R14c)
     for a, b in zip(words, words[1:]):
-        if a != b and (a.startswith(b) or b.startswith(a)):
+        if a.startswith(b) or b.startswith(a):
             return False
     if kiwi is None:
         return True

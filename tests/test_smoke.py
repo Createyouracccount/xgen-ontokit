@@ -1557,12 +1557,19 @@ def test_ner_ensemble_union_gates():
             return [{"entity": "서울", "class": "기관"},          # 중복 스팬 — 제외
                     {"entity": "MHKs", "class": "기관"},          # 약어 복수형 — 컷
                     {"entity": "수르지크어", "class": "기관"},     # 언어명→기관 — 컷
-                    {"entity": "2011", "class": "수량"},          # 연도 재매핑
+                    {"entity": "2011", "class": "수량"},          # R14c: 한글 미포함 — 컷
                     {"entity": "안성농업전문학교", "class": "기관"}]  # 정상 신규
     out = EnsembleNER(Base(), Aux()).entities("t", source_chunks=[])
     ents = {e["entity"]: e["class"] for e in out}
-    assert ents == {"서울": "지역", "2011": "날짜", "안성농업전문학교": "기관"}
+    assert ents == {"서울": "지역", "안성농업전문학교": "기관"}
     assert aux_gate({"entity": "a De Mornay", "class": "인물"}) is None
+    # R14c 게이트: 한글 미포함(라틴 완전명도 EnglishNER 소관) · 상대년 파편 · 동일 어절 반복
+    assert aux_gate({"entity": "Manhattan", "class": "지역"}) is None
+    assert aux_gate({"entity": "咸康", "class": "지역"}) is None
+    assert aux_gate({"entity": "5년", "class": "날짜"}) is None
+    assert aux_gate({"entity": "1535년", "class": "날짜"}) is not None  # 절대연도는 통과
+    from ontokit.instance_typing import label_ok
+    assert not label_ok("가능역 가능역")  # 동일 어절 반복 (R14c)
 
 
 def test_en_ner_auto_wire_env(monkeypatch):
