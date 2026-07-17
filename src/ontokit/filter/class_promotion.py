@@ -110,6 +110,17 @@ class ClassPromotionFilter:
             self._cache[label] = best
         return self._cache[label]
 
+    def _en_pos(self, label: str):
+        """라틴 라벨 nltk POS 태그열 — nltk/태거 미설치 시 None(게이트 생략)."""
+        try:
+            import nltk
+            toks = label.split()
+            if not toks:
+                return []
+            return [t for _, t in nltk.pos_tag(toks)]
+        except Exception:
+            return None
+
     def decide(self, label: str, *, df: int = 1, has_rel: bool = False,
                has_kid: bool = False, has_inst: bool = False) -> PromotionDecision:
         label = (label or "").strip()
@@ -127,7 +138,31 @@ class ClassPromotionFilter:
             return PromotionDecision(False, "repeat")
 
         if not _HANGUL.search(label):
-            return PromotionDecision(True, "")  # 라틴 v1 스코프 밖(공시)
+            # R-en-2: 라틴 라벨 문법 게이트 — nltk POS 로 명사구 검증 (한국어 게이트와
+            # 동일 원리: 클래스 후보는 명사 head 로 끝나는 명사구여야). nltk 미설치면
+            # 기존대로 통과(v1 하위호환·폴백 공시).
+            words = label.split()
+            # 정서법 우선(폐형식): 문맥 없는 단독어 nltk 태깅은 불안정(Budapest→JJS,
+            # King→VBG 실측) — TitleCase 종결어는 고유명사로 보고 POS 게이트 우회.
+            if words and words[-1][:1].isupper() and not label.isupper():
+                return PromotionDecision(True, "")
+            en_tags = self._en_pos(label)
+            if en_tags is None:
+                return PromotionDecision(True, "")
+            if not en_tags or not en_tags[-1].startswith("NN"):
+                return PromotionDecision(False, "shape")  # 비명사 종결('provide'·'quickly')
+            if len(label) <= 2 or (label.islower() and len(label.split()) == 1 and len(label) <= 3):
+                return PromotionDecision(False, "shape")  # 약어 파편('AA'·'le')
+            # 단독 소문자 1단어는 nltk 가 동사도 NN 오태깅('provide') — WordNet 명사
+            # synset 존재로 판정(공개 어휘자원, 우리말샘 전례). wordnet 부재 시 통과.
+            if label.islower() and len(label.split()) == 1:
+                try:
+                    from nltk.corpus import wordnet
+                    if not wordnet.synsets(label, pos=wordnet.NOUN):
+                        return PromotionDecision(False, "shape")
+                except Exception:
+                    pass
+            return PromotionDecision(True, "")
 
         toks = self._tokens(label)
         if toks is None:
