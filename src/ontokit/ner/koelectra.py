@@ -78,7 +78,8 @@ class KoElectraNER:
                 # 선결 재료. HF 파이프라인이 주는 원문 문자 오프셋 그대로.
                 out.append({"entity": w, "class": TTA_LABEL_KO.get(g, g),
                             "type": "INSTANCE", "source_chunks": source_chunks,
-                            "start": e.get("start"), "end": e.get("end")})
+                            "start": e.get("start"), "end": e.get("end"),
+                            "score": round(float(e.get("score", 1.0)), 4)})
         return out
 
     def entities(self, text: str, *, source_chunks: list[str],
