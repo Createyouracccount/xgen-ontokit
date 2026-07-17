@@ -1575,3 +1575,17 @@ def test_en_ner_auto_wire_env(monkeypatch):
     ex2 = DeterministicKoreanExtractor(enable_relations=False, auto_english=False, enable_hearst=False)
     # transformers 설치 환경이면 EnglishNER, 아니면 None(실패 무해) — 예외만 없으면 통과
     assert ex2.en_ner is None or type(ex2.en_ner).__name__ == "EnglishNER"
+
+
+def test_english_relation_extractor():
+    """R-en-1 — 의존 SVO: 능동·전치사 채택, 시간 PP·대명사·계사 컷."""
+    try:
+        import spacy; spacy.load("en_core_web_sm")
+    except Exception:
+        import pytest; pytest.skip("spacy/en_core_web_sm 미설치")
+    from ontokit.extractors.relation_en import EnglishRelationExtractor
+    ex = EnglishRelationExtractor()
+    r = ex.extract("Germany invaded the Soviet Union in June 1941.")
+    assert ("Germany", "invade", "Soviet Union") in [(x["subject"], x["predicate"], x["object"]) for x in r]
+    assert all("June" not in x["object"] for x in r)  # 시간 PP 승격 금지
+    assert ex.extract("It is a beautiful day. He has a car.") == []

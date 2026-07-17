@@ -90,6 +90,16 @@ class DeterministicKoreanExtractor:
                 self.relations = relation_extractor
             else:
                 self.relations = self._default_relation_extractor()
+        # R-en-1 영어 관계(opt-in): env ONTOKIT_RELATION_EN=auto + spacy 설치 시
+        # 라틴 청크에 의존 SVO. 블라인드 2인 합의 유효 ~85%(한국어 규칙 21~43% 대비).
+        self.relations_en = None
+        if enable_relations and _os.getenv("ONTOKIT_RELATION_EN", "").lower() == "auto":
+            try:
+                from .relation_en import EnglishRelationExtractor
+                self.relations_en = EnglishRelationExtractor()
+                logger.info("영어 관계 채널 = spaCy 의존 SVO(auto)")
+            except Exception:
+                logger.warning("영어 관계 추출기 로드 실패 — 영어 관계 생략", exc_info=True)
         # 코퍼스레벨 관계추출기(extract_corpus, 예: hybrid) 판별 — 청크별 extract 대신
         # 루프 뒤 1회 호출(예산 가드레일이 코퍼스 전체 기준으로 작동).
         self._rel_is_corpus = (self.relations is not None
@@ -270,6 +280,12 @@ class DeterministicKoreanExtractor:
                         rels = self.relations.extract(text, source_chunks=sc)
                         if rels:
                             all_relations.extend(rels)
+                elif self.relations_en is not None and _LATIN_WORD.search(text):
+                    # 라틴 지배 청크 — 영어 의존 SVO (한글 게이트 미발화 시에만)
+                    try:
+                        all_relations.extend(self.relations_en.extract(text))
+                    except Exception:
+                        pass
                 # ④' 정의문 계층(opt-in) — 접미공유가 원리적 불가한 이질 상위어
                 #   (강아지⊂동물, 계란빵⊂음식). 종결 패턴(계사/genus/서술/속하는) 정밀
                 #   targeting. 외부 gold(Wikidata P279) 심판루프 89/100 검증(순증 +0.30,
