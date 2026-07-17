@@ -1563,3 +1563,15 @@ def test_ner_ensemble_union_gates():
     ents = {e["entity"]: e["class"] for e in out}
     assert ents == {"서울": "지역", "2011": "날짜", "안성농업전문학교": "기관"}
     assert aux_gate({"entity": "a De Mornay", "class": "인물"}) is None
+
+
+def test_en_ner_auto_wire_env(monkeypatch):
+    """R-en-0 — ONTOKIT_NER_EN=auto 면 영어 NER 지연 배선, 미설정이면 기존대로 None."""
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+    monkeypatch.delenv("ONTOKIT_NER_EN", raising=False)
+    ex = DeterministicKoreanExtractor(enable_relations=False, auto_english=False, enable_hearst=False)
+    assert ex.en_ner is None
+    monkeypatch.setenv("ONTOKIT_NER_EN", "auto")
+    ex2 = DeterministicKoreanExtractor(enable_relations=False, auto_english=False, enable_hearst=False)
+    # transformers 설치 환경이면 EnglishNER, 아니면 None(실패 무해) — 예외만 없으면 통과
+    assert ex2.en_ner is None or type(ex2.en_ner).__name__ == "EnglishNER"

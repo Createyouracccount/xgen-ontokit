@@ -74,6 +74,15 @@ class DeterministicKoreanExtractor:
                 from ..morphology.en_nouns import EnglishNounExtractor
                 self.en_nouns = EnglishNounExtractor(domain_words)
         self.en_ner = en_ner
+        # R-en-0: 영어 NER 자동 배선 (env ONTOKIT_NER_EN=auto — 모델 다운로드가
+        # 무거워 기본은 기존대로 명시 주입만. auto 면 transformers 설치 시 지연 로드).
+        if self.en_ner is None and _os.getenv("ONTOKIT_NER_EN", "").lower() == "auto":
+            try:
+                from ontokit.ner.english import EnglishNER
+                self.en_ner = EnglishNER()
+                logger.info("영어 NER 자동 배선(ONTOKIT_NER_EN=auto)")
+            except Exception:
+                logger.warning("영어 NER 자동 배선 실패 — 영어 인스턴스 생략", exc_info=True)
         # 한국어 관계(objectProperty) 추출 — 조사 기반 SVO. Kiwi 인스턴스 공유.
         self.relations = None
         if enable_relations:
