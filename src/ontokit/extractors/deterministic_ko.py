@@ -54,6 +54,18 @@ class DeterministicKoreanExtractor:
         지배언어 라우팅 유지. 관계는 조사 기반이라 한국어 청크만."""
         self.nouns = KiwiNounExtractor(kiwi, domain_words)
         self.ner = ner
+        # R14b 보조 NER union (opt-in, 기본 off — 최종심판 0717: n=60 합의 오탐 10.0%는
+        # 게이트 미배제 값, on 승격은 n≥150 재판정 조건). env 에 aux 모델 지정 시에만.
+        import os as _os
+        _aux_model = _os.getenv("ONTOKIT_NER_AUX_MODEL")
+        if _aux_model and self.ner is not None:
+            try:
+                from ontokit.ner.koelectra import KoElectraNER as _K
+                from ontokit.ner.ensemble import EnsembleNER
+                self.ner = EnsembleNER(self.ner, _K(model=_aux_model), kiwi=self.nouns.kiwi)
+                logger.info("NER 앙상블 opt-in: aux=%s", _aux_model)
+            except Exception:
+                logger.warning("보조 NER 로드 실패 — 현행 단독 유지", exc_info=True)
         self.en_nouns = en_nouns
         if self.en_nouns is None and auto_english:
             # extras[english](nltk) 설치돼 있으면 영어 명사추출 자동 배선(#4 auto-wire).

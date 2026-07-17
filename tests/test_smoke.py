@@ -1543,3 +1543,23 @@ def test_ner_two_pass_covers_tail(monkeypatch):
     monkeypatch.setenv("ONTOKIT_NER_TWO_PASS", "1")
     out2 = ner.entities(text, source_chunks=[])
     assert {e["entity"] for e in out2} == {"전반개체", "후반개체"} and len(calls) == 2
+
+
+def test_ner_ensemble_union_gates():
+    """R14b — aux 는 신규 스팬만·게이트 통과분만 union, 실패는 비치명."""
+    from ontokit.ner.ensemble import EnsembleNER, aux_gate
+
+    class Base:
+        def entities(self, text, *, source_chunks):
+            return [{"entity": "서울", "class": "지역"}]
+    class Aux:
+        def entities(self, text, *, source_chunks):
+            return [{"entity": "서울", "class": "기관"},          # 중복 스팬 — 제외
+                    {"entity": "MHKs", "class": "기관"},          # 약어 복수형 — 컷
+                    {"entity": "수르지크어", "class": "기관"},     # 언어명→기관 — 컷
+                    {"entity": "2011", "class": "수량"},          # 연도 재매핑
+                    {"entity": "안성농업전문학교", "class": "기관"}]  # 정상 신규
+    out = EnsembleNER(Base(), Aux()).entities("t", source_chunks=[])
+    ents = {e["entity"]: e["class"] for e in out}
+    assert ents == {"서울": "지역", "2011": "날짜", "안성농업전문학교": "기관"}
+    assert aux_gate({"entity": "a De Mornay", "class": "인물"}) is None
