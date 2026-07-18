@@ -87,8 +87,8 @@ def main():
             if step % 200 == 0:
                 print(f"ep{ep} step {step}/{steps} loss {out.loss.item():.4f}", flush=True)
 
-    model.save_pretrained("model_re_aug")
-    tok.save_pretrained("model_re_aug")
+    model.save_pretrained("model_re_aug_v11")
+    tok.save_pretrained("model_re_aug_v11")
     print("saved → model_re_aug/")
     print("M2-TRAIN-DONE")
 
