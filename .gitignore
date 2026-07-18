@@ -20,3 +20,4 @@ eval/entity_resolution/data/*.txt
 eval/entity_resolution/data/*.json
 eval/entity_resolution/data/*.xml
 eval/entity_resolution/*.log
+eval/relation/model_re_aug/

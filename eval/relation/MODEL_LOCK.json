@@ -1,0 +1,15 @@
+{
+  "relation_encoder_ko": {
+    "version": "re-ko-aug-v1",
+    "description": "klue/roberta-small + KLUE-RE + SREDFM-ko 증강(필터 4종). holdout micro-F1 0.6259 (기존 0.5924). 심판 95/100 채택 (2026-07-18).",
+    "release_tag": "re-ko-aug-v1",
+    "asset": "model_re_aug_v1.tar.gz",
+    "asset_sha256": "20b9de19980fb9bd085816556006ba8b4cec33dab501527280538f0720e07949",
+    "safetensors_sha256": "ce4c3bdf10885ce57128172d28a449f5baefba83c92e5e9f750bf7a44b1b26a9",
+    "env": "ONTOKIT_RELATION_ENCODER_MODEL",
+    "previous": {
+      "version": "re-ko-v1",
+      "note": "model_re/ (KLUE 단독, holdout 0.5924) — 롤백 지점, 로컬 보존 (심판 조건 1)"
+    }
+  }
+}
