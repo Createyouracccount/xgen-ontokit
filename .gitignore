@@ -22,3 +22,4 @@ eval/entity_resolution/data/*.xml
 eval/entity_resolution/*.log
 eval/relation/model_re_aug/
 eval/relation/model_re_aug_v11/
+eval/relation/model_re_aug_v12/

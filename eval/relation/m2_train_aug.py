@@ -25,8 +25,13 @@ from torch.utils.data import DataLoader
 from labels import LABEL2ID
 from train_encoder import (BATCH, EPOCHS, LR, MODEL, SEED, SPECIALS, REDataset)
 
-AUG_PATH = "/Users/kimdu/company/xgen-levelup/eval_runs/relations/m2_sredfm_klue_aug.jsonl"
-AUG_CAP = 8000  # 라벨당 증강 상한
+import os
+# 0718b 심판 반려 조치: 캡 재표집 교란(파일 행수→셔플 순열→학습셋 26% 교체) 차단 —
+# 사전 고정셋(M2_AUG_PATH, 캡 기적용)을 주면 캡 로직이 그대로 통과(선착순 캡 무해)
+AUG_PATH = os.getenv("M2_AUG_PATH",
+                     "/Users/kimdu/company/xgen-levelup/eval_runs/relations/m2_sredfm_klue_aug.jsonl")
+AUG_CAP = int(os.getenv("M2_AUG_CAP", "8000"))  # 라벨당 증강 상한
+OUT_DIR = os.getenv("M2_OUT", "model_re_aug_v11")
 
 
 def load_aug():
@@ -87,9 +92,9 @@ def main():
             if step % 200 == 0:
                 print(f"ep{ep} step {step}/{steps} loss {out.loss.item():.4f}", flush=True)
 
-    model.save_pretrained("model_re_aug_v11")
-    tok.save_pretrained("model_re_aug_v11")
-    print("saved → model_re_aug/")
+    model.save_pretrained(OUT_DIR)
+    tok.save_pretrained(OUT_DIR)
+    print(f"saved → {OUT_DIR}/")
     print("M2-TRAIN-DONE")
 
 
