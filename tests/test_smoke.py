@@ -1612,3 +1612,65 @@ def test_english_relation_extractor():
     assert ("Germany", "invade", "Soviet Union") in [(x["subject"], x["predicate"], x["object"]) for x in r]
     assert all("June" not in x["object"] for x in r)  # 시간 PP 승격 금지
     assert ex.extract("It is a beautiful day. He has a car.") == []
+
+
+def test_occupation_typing_module():
+    """P106 직업 타이핑(0718~19 심판 검증 채널) — 어휘집 매칭·동률 인물지배·복수직업 병기."""
+    from ontokit.instance_typing.occupation import (
+        load_occupation_lexicon, apply_occupation_typing)
+
+    lex = load_occupation_lexicon()
+    assert len(lex) > 3500  # 동봉 어휘집 로드 (4,011 라벨)
+    ents = {"d": [
+        {"entity": "박재범", "class": "인물", "source_chunks": ["c1"]},
+        # 동률(인물1:지역1) — 채택 라운드 정합: 인물이 최대값 중 하나면 통과
+        {"entity": "수지", "class": "인물", "source_chunks": ["c2"]},
+        {"entity": "수지", "class": "지역", "source_chunks": ["c2"]},
+        # 인물 단독 열세 — 컷 (동음이의 방어)
+        {"entity": "이상", "class": "인공물", "source_chunks": ["c3"]},
+        {"entity": "이상", "class": "인공물", "source_chunks": ["c3"]},
+        {"entity": "이상", "class": "인물", "source_chunks": ["c3"]},
+        # 복수 직업 — 대표(최고 conf) in-place + 나머지 병기 레코드
+        {"entity": "갈릴레오 갈릴레이", "class": "인물", "source_chunks": ["c4"]},
+    ]}
+    pairs, extra, n = apply_occupation_typing(ents)
+    by = {}
+    for e in ents["d"]:
+        by.setdefault(e["entity"], set()).add(e["class"])
+    assert "가수" in by["박재범"] and "가수" in by["수지"]
+    assert "지역" in by["수지"]  # 가산 의미론(심판 D1) — 비인물 레코드 보존
+    assert by["이상"] == {"인공물", "인물"}  # 비인물지배 — 불변
+    assert "물리학자" in by["갈릴레오 갈릴레이"]
+    extra_cls = {r["record"]["class"] for r in extra if r["record"]["entity"] == "갈릴레오 갈릴레이"}
+    assert extra_cls  # 복수직업 병기 존재(철학자 등)
+    assert ("가수", "인물") in pairs  # 상향 경로 계층쌍
+
+
+def test_occupation_typing_wired_in_extractor(monkeypatch):
+    """추출기 배선 — 재타입·계층쌍 합류·클래스 존재 보장·env kill-switch."""
+    try:
+        from kiwipiepy import Kiwi  # noqa: F401
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+
+    class FakeNER:
+        def entities(self, text, *, source_chunks):
+            return [{"entity": "박재범", "class": "인물", "type": "INSTANCE",
+                     "source_chunks": source_chunks, "start": 0, "end": 3}]
+
+    docs = {"doc": [{"chunk_id": "c1", "chunk_text": "박재범은 노래를 발표했다."}]}
+    ex = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
+                                      auto_english=False, enable_hearst=False)
+    merged, ents, _rels, _dp = asyncio.run(ex.extract(docs))
+    assert any(e["entity"] == "박재범" and e["class"] == "가수"
+               for e in ents["doc"])
+    assert {"child": "가수", "parent": "인물"} in [
+        {"child": h["child"], "parent": h["parent"]} for h in merged["class_hierarchy"]]
+
+    monkeypatch.setenv("ONTOKIT_OCCUPATION_TYPING", "off")
+    ex2 = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
+                                       auto_english=False, enable_hearst=False)
+    _m2, ents2, _r2, _d2 = asyncio.run(ex2.extract(docs))
+    assert all(e["class"] == "인물" for e in ents2["doc"] if e["entity"] == "박재범")

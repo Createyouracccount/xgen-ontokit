@@ -33,7 +33,7 @@ class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
                  en_nouns=None, en_ner=None, relation_extractor=None,
                  enable_relations: bool = True, auto_english: bool = True,
-                 enable_hearst: bool = True):
+                 enable_hearst: bool = True, enable_occupation: bool = True):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
         domain_words: 사용자사전 도메인 용어(한국어 Kiwi 사용자사전 + 영어 단일명사 허용목록).
@@ -112,6 +112,11 @@ class DeterministicKoreanExtractor:
         # 법령체 따옴표 정의문('"X"이란 … 말한다')만 커버하는 보수 패턴이라
         # 정의문 밀도 높은 코퍼스(법령·규정)에서 opt-in 으로 켠다. A/B 순도 실측 후 결정.
         self.enable_hearst = enable_hearst
+        # 직업 타이핑 채널 (P106 어휘집, 심판 검증 0718~19) — 기본 on, 결정론·LLM 0콜.
+        # env ONTOKIT_OCCUPATION_TYPING=off 로 강제 비활성(A/B·긴급 차단용).
+        self.enable_occupation = (enable_occupation
+                                  and _os.getenv("ONTOKIT_OCCUPATION_TYPING", "").lower()
+                                  not in ("off", "false", "0"))
         self._lock = threading.Lock()
 
     def _default_relation_extractor(self):
@@ -331,6 +336,25 @@ class DeterministicKoreanExtractor:
                 logger.info("정의문 인스턴스 타이핑: 개체 %d건 재타입, TTA계층쌍 %d",
                             n_def_typed, len(hearst_tta_pairs))
 
+        # ②"' 직업 타이핑 (P106 어휘집) — 외부지식 채널. 정의문 타이핑 **후** 실행 —
+        #   인물지배 판정이 정의문 반영 분포에서 이뤄진다(r15_inst_dist=빌드 후 상태와
+        #   정합). 재타입은 인물 클래스 레코드만(가산 의미론) — 정의문이 부여한
+        #   세밀타입 레코드는 덮지 않는다(심판 D1·D2).
+        #   복수 직업(갈릴레이=물리학자·수학자)은 동일 라벨 추가 레코드로 병기,
+        #   직업클래스⊂인물 계층쌍으로 상향 경로 보존(정의문 채널의 TTA 패턴).
+        occ_hier_pairs: list[tuple[str, str]] = []
+        if self.enable_occupation and all_entities:
+            try:
+                from ontokit.instance_typing.occupation import apply_occupation_typing
+                occ_hier_pairs, occ_extra, n_occ = apply_occupation_typing(all_entities)
+                for item in occ_extra:
+                    all_entities.setdefault(item["doc"], []).append(item["record"])
+                if n_occ:
+                    logger.info("직업 타이핑(P106): 개체 %d건 재타입, 복수직업 병기 %d, 계층쌍 %d",
+                                n_occ, len(occ_extra), len(occ_hier_pairs))
+            except Exception:
+                logger.warning("직업 타이핑 채널 실패 — 채널 생략(비치명)", exc_info=True)
+
         # ③' 코퍼스레벨 관계추출(hybrid top-up) — 수집한 한국어 청크 1회 처리.
         #   예산 가드레일(청크% ∨ 달러)이 코퍼스 전체 기준으로 작동해 LLM-free 가치
         #   보존. extract_corpus 는 async 라 이 sync 본문에서 새 이벤트루프로 실행
@@ -362,6 +386,11 @@ class DeterministicKoreanExtractor:
             all_hier.extend(hearst_tta_pairs)
             for hp in hearst_tta_pairs:
                 class_chunks.setdefault(hp["parent"], set())  # TTA 클래스 존재 보장
+        for child, parent in occ_hier_pairs:
+            # 직업클래스 ⊂ 인물 — 직업 타이핑으로 이탈한 개체의 대분류 도달 경로 보존
+            all_hier.append({"child": child, "parent": parent})
+            class_chunks.setdefault(child, set())
+            class_chunks.setdefault(parent, set())
         # ⚠️pair 단위 dedup — existing 이어빌드 시 기존 hierarchy + 재유도 결과가 겹쳐
         # 패스마다 동일 pair 가 선형 증식(2→4→6, 0711 리뷰 실측)했고, 중복 pair 는
         # OWL disjoint 의 형제 리스트에 중복 URI 를 넣어 자기-disjoint(unsatisfiable)
