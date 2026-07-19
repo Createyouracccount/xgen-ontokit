@@ -70,7 +70,10 @@ def _evidence_ok(label: str, concept: str, texts: list[str], mode: str) -> bool:
     - doc: 동일 청크 공기(약한 증거 — 위키류 회수 우선 시).
     - off: 게이트 없음(위키류 최대 회수 — 도메인 코퍼스엔 비권장).
     """
-    if mode == "off" or len(label.replace(" ", "")) > SHORT_LABEL_MAX:
+    # 면제는 **한글 음절 수** 기준(B4 심판 D1): "T.O.P"(한글 0자) 같은 라틴·기호
+    # 예명이 문자 길이 면제로 게이트를 우회하던 사각 봉쇄 — 비한글 라벨도 짧은
+    # 한글 모노님과 동일한 지시체 위험이므로 게이트 대상.
+    if mode == "off" or len(re.sub(r"[^가-힣]", "", label)) > SHORT_LABEL_MAX:
         return True
     if mode == "doc":
         return any((label in t and concept in t) for t in texts)

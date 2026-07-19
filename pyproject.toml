@@ -1,6 +1,6 @@
 [project]
 name = "xgen-ontokit"
-version = "0.12.1"
+version = "0.13.0"
 description = "XGEN 온톨로지 빌드·검색 개선 키트 — LLM-free 한국어 추출 + 계층 검색. 백엔드 무관, 코어 의존성 0."
 readme = "README.md"
 requires-python = ">=3.11"
