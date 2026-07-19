@@ -1633,7 +1633,7 @@ def test_occupation_typing_module():
         # 복수 직업 — 대표(최고 conf) in-place + 나머지 병기 레코드
         {"entity": "갈릴레오 갈릴레이", "class": "인물", "source_chunks": ["c4"]},
     ]}
-    pairs, extra, n = apply_occupation_typing(ents)
+    pairs, extra, n = apply_occupation_typing(ents)  # chunk_texts 없음 → 게이트 off(호환)
     by = {}
     for e in ents["d"]:
         by.setdefault(e["entity"], set()).add(e["class"])
@@ -1644,6 +1644,19 @@ def test_occupation_typing_module():
     extra_cls = {r["record"]["class"] for r in extra if r["record"]["entity"] == "갈릴레오 갈릴레이"}
     assert extra_cls  # 복수직업 병기 존재(철학자 등)
     assert ("가수", "인물") in pairs  # 상향 경로 계층쌍
+
+    # 증거 게이트(adj 기본, B1 뉴스 실측 오탐 63.6%→0%): 짧은 라벨은 직업어
+    # 인접 공기 없으면 컷, 인접 공기 있으면 통과. 4자+ 는 면제.
+    ents2 = {"d": [{"entity": "수지", "class": "인물", "source_chunks": ["c"]},
+                   {"entity": "윤하", "class": "인물", "source_chunks": ["c"]},
+                   {"entity": "갈릴레오 갈릴레이", "class": "인물", "source_chunks": ["c"]}]}
+    texts = ["두산에너빌리티 수지 부문 실적 발표.", "가수 윤하가 신곡을 냈다.",
+             "갈릴레오 갈릴레이 관련 전시."]
+    _p2, _e2, _n2 = apply_occupation_typing(ents2, chunk_texts=texts, evidence_mode="adj")
+    by2 = {e["entity"]: e["class"] for e in ents2["d"]}
+    assert by2["수지"] == "인물"          # 인접 증거 없음 — 컷
+    assert by2["윤하"] == "가수"          # '가수 윤하' 인접 — 통과
+    assert by2["갈릴레오 갈릴레이"] == "물리학자"  # 4자+ 면제
 
 
 def test_occupation_typing_wired_in_extractor(monkeypatch):
@@ -1660,7 +1673,7 @@ def test_occupation_typing_wired_in_extractor(monkeypatch):
             return [{"entity": "박재범", "class": "인물", "type": "INSTANCE",
                      "source_chunks": source_chunks, "start": 0, "end": 3}]
 
-    docs = {"doc": [{"chunk_id": "c1", "chunk_text": "박재범은 노래를 발표했다."}]}
+    docs = {"doc": [{"chunk_id": "c1", "chunk_text": "가수 박재범은 노래를 발표했다."}]}
     ex = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
                                       auto_english=False, enable_hearst=False)
     merged, ents, _rels, _dp = asyncio.run(ex.extract(docs))

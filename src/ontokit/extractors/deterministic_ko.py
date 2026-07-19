@@ -346,7 +346,11 @@ class DeterministicKoreanExtractor:
         if self.enable_occupation and all_entities:
             try:
                 from ontokit.instance_typing.occupation import apply_occupation_typing
-                occ_hier_pairs, occ_extra, n_occ = apply_occupation_typing(all_entities)
+                # 증거 게이트용 한국어 청크 원문 — 짧은 라벨(≤3자)의 지시체 검증
+                # (env ONTOKIT_OCCUPATION_EVIDENCE=adj 기본, B1 실측: 뉴스 오탐 63.6%→0%)
+                occ_texts = [t for _, t, _ in ko_ner_buf]
+                occ_hier_pairs, occ_extra, n_occ = apply_occupation_typing(
+                    all_entities, chunk_texts=occ_texts)
                 for item in occ_extra:
                     all_entities.setdefault(item["doc"], []).append(item["record"])
                 if n_occ:

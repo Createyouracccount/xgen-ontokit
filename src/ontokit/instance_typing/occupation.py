@@ -56,16 +56,51 @@ def load_occupation_lexicon(path: Optional[str] = None) -> dict[str, list[dict]]
     return lex
 
 
+SHORT_LABEL_MAX = 3   # 증거 게이트 대상: 정규화 3자 이하(모노님·절단·동명이인 위험대)
+ADJ_WINDOW = 15       # adj 모드 인접 창(자)
+
+
+def _evidence_ok(label: str, concept: str, texts: list[str], mode: str) -> bool:
+    """코퍼스 증거 게이트(B1 심판 권고 이행) — 짧은 라벨의 지시체 검증.
+
+    뉴스(비위키) 전량 채점 실측: 게이트 없음 오탐 63.6% → doc 18.2% → adj 0%.
+    wiki2 천장 비용: 0.0867 → doc 0.0832 → adj 0.0794 (상대 -8%, OFF 0.0056 대비
+    여전히 14배). 오탐 전원이 ≤3자 모노님이라 게이트는 짧은 라벨에만 적용.
+    - adj(기본): 직업어가 라벨과 15자 이내 인접 공기('가수 수지') — 지시체 직접 증거.
+    - doc: 동일 청크 공기(약한 증거 — 위키류 회수 우선 시).
+    - off: 게이트 없음(위키류 최대 회수 — 도메인 코퍼스엔 비권장).
+    """
+    if mode == "off" or len(label.replace(" ", "")) > SHORT_LABEL_MAX:
+        return True
+    if mode == "doc":
+        return any((label in t and concept in t) for t in texts)
+    # 라벨 좌경계: 한글 접두 결합('무역수지'의 '수지') 관통 방지 — B1 심판 D1
+    lb = r"(?<![가-힣])" + re.escape(label)
+    pat = re.compile(re.escape(concept) + r".{0,%d}" % ADJ_WINDOW + lb
+                     + "|" + lb + r".{0,%d}" % ADJ_WINDOW + re.escape(concept))
+    return any(pat.search(t) for t in texts)
+
+
 def apply_occupation_typing(all_entities: dict[str, list],
                             lexicon: Optional[dict[str, list[dict]]] = None,
                             person_class: str = PERSON_CLASS,
+                            chunk_texts: Optional[list[str]] = None,
+                            evidence_mode: Optional[str] = None,
                             ) -> tuple[list[tuple[str, str]], list[dict], int]:
     """어휘집 매칭 개체를 직업클래스로 재타입 (in-place).
 
+    chunk_texts: 코퍼스 청크 원문(증거 게이트용). None 이면 게이트 생략(호환 —
+    배선측은 반드시 전달할 것). evidence_mode: adj(기본)|doc|off,
+    env ONTOKIT_OCCUPATION_EVIDENCE 로 재정의.
     반환: (직업클래스⊂인물 계층쌍 리스트, 추가 방출할 복수직업 엔티티 레코드,
     재타입 개체 수). 추가 레코드는 호출측이 all_entities 의 해당 문서 리스트에
     append 한다(여기선 원본 순회 중이라 in-place append 금지).
     """
+    import os
+    if evidence_mode is None:
+        evidence_mode = os.getenv("ONTOKIT_OCCUPATION_EVIDENCE", "adj").lower()
+    if chunk_texts is None:
+        evidence_mode = "off"
     if lexicon is None:
         lexicon = load_occupation_lexicon()
 
@@ -88,6 +123,13 @@ def apply_occupation_typing(all_entities: dict[str, list],
     extra_records: list[dict] = []
     n_typed = 0
     seen_extra: set[tuple[str, str]] = set()  # (norm, concept) — 추가 레코드 중복 방지
+    ev_cache: dict[tuple[str, str], bool] = {}  # (라벨,개념) 증거 판정 캐시
+
+    def _ev(label: str, concept: str) -> bool:
+        key = (label, concept)
+        if key not in ev_cache:
+            ev_cache[key] = _evidence_ok(label, concept, chunk_texts or [], evidence_mode)
+        return ev_cache[key]
     for doc, ents in all_entities.items():
         for e in ents:
             n = _norm(e.get("entity") or "")
@@ -100,11 +142,15 @@ def apply_occupation_typing(all_entities: dict[str, list],
             # 통과했으므로 인물 레코드는 최소 1개 존재(인물이 최대값 중 하나).
             if e.get("class") != person_class:
                 continue
-            primary = rows[0]["concept"]
+            lab = e.get("entity") or ""
+            passing = [r for r in rows if _ev(lab, r["concept"])]
+            if not passing:
+                continue  # 증거 게이트 컷(짧은 라벨·직업어 비공기) — 지시체 불확실
+            primary = passing[0]["concept"]
             e["class"] = primary
             n_typed += 1
             hier_pairs.add((primary, person_class))
-            for r in rows[1:]:  # 복수 직업 — 동일 라벨 추가 레코드로 병기
+            for r in passing[1:]:  # 복수 직업 — 동일 라벨 추가 레코드로 병기
                 key = (n, r["concept"])
                 if key in seen_extra:
                     continue
