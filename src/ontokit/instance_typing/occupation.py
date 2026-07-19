@@ -97,8 +97,23 @@ def _evidence_ok(label: str, concept: str, texts: list[str], mode: str) -> bool:
     # 면제는 **한글 음절 수** 기준(B4 심판 D1): "T.O.P"(한글 0자) 같은 라틴·기호
     # 예명이 문자 길이 면제로 게이트를 우회하던 사각 봉쇄 — 비한글 라벨도 짧은
     # 한글 모노님과 동일한 지시체 위험이므로 게이트 대상.
-    if mode == "off" or len(re.sub(r"[^가-힣]", "", label)) > SHORT_LABEL_MAX:
+    if mode == "off":
         return True
+    if len(re.sub(r"[^가-힣]", "", label)) > SHORT_LABEL_MAX:
+        # adjdoc(id4, 도메인 코퍼스 opt-in): 긴 라벨도 doc 약증거 요구 — 장라벨
+        # 동명이인 오탐(브렛 테일러[트위터 의장]→배우, 뉴스 실측) 차단. 위키류엔
+        # 비권장: wiki2 실측 GT 정탐 22건 손실(문서에 단서어 부재, 경계 수리판).
+        # 그 외 모드는 기존 면제 유지(B1~B7 채택 동결분 무변경).
+        if mode != "adjdoc":
+            return True
+        # 렌즈B A1/A3 수리: 단서어·라벨 모두 한글 경계 매칭 — '역사상'의 '사상',
+        # '물리치다'의 '물리' 부분문자열 오허용과 '대박김수현민'류 라벨 관통 차단.
+        lb_long = re.compile(r"(?<![가-힣])" + re.escape(label)
+                             + r"(?=[은는이가을를도의와과에로서랑이나든]|[^가-힣]|$)")
+        cue_pats = [re.compile(r"(?<![가-힣])" + re.escape(c))
+                    for c in EVIDENCE_CUES.get(concept, [concept])]
+        return any(lb_long.search(t) and any(p.search(t) for p in cue_pats)
+                   for t in texts)
     if mode == "doc":
         return any((label in t and concept in t) for t in texts)
     # 라벨 좌경계: 한글 접두 결합('무역수지'의 '수지') 관통 방지 — B1 심판 D1.
