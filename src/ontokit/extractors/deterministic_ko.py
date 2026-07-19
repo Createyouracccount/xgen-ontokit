@@ -126,7 +126,13 @@ class DeterministicKoreanExtractor:
         불변식: env 미지정이거나 extras[relation-encoder] 미설치면 규칙 채널.
         "설치·설정 안 하면 인코더는 안 켜진다"(사용자 요건). 인코더는 NER(self.ner)로
         개체쌍을 만들므로 NER 도 있어야 실효 — NER 없으면 인코더는 빈 결과라 규칙 사용.
-        정본: docs/ontokit_관계_KLUE-RE_인코더_심판루프_90_2026_07_14.md."""
+        정본: docs/ontokit_관계_KLUE-RE_인코더_심판루프_90_2026_07_14.md.
+
+        ⚠️규칙(relation_ko) 지위 확정(0719 B3 심판 94/100, holdout 재판): **가용성
+        폴백 전용** — 인코더와의 앙상블(E2 규칙우선·E3 인코더우선+규칙보완)은 tune·
+        holdout 양쪽에서 순손실(holdout 단독 0.6274 > E3 0.6199 > E2 0.5985; 규칙
+        교정 29 vs 오염 144, 부호검정 유의)로 **영구 기각**. 인코더에 규칙을 섞는
+        변경은 새 홀드아웃 재판 없이 금지. 영어 채널(relation_en)과는 무관."""
         import os
         from .relation_ko import KoreanRelationExtractor
 

@@ -5,6 +5,12 @@
   E2 rules→encoder      : 규칙 발화 우선(고정밀), 미발화 시 인코더
   E3 encoder→rules      : 인코더 우선, no_relation 일 때만 규칙
 사용: python3 eval_encoder.py tune | python3 eval_encoder.py holdout(심판 전용)
+
+⚠️주의(B3 심판 D1): 이 스크립트의 E2/E3 는 **게이트 적용 인코더** 기반. 0719 처분
+재판의 보고 수치(tune 0.8325/0.8301/0.8096)는 **raw 인코더** 기반 앙상블 — 게이트는
+실측 유해(holdout 0.6274→0.5996)라 프로덕션 미사용이며, 재현하려면 gate 를 끄고
+앙상블할 것. 처분 결론(0719 B3 94/100): 앙상블 양방향 순손실 → relation_ko 는
+가용성 폴백 전용으로 확정, E2/E3 승격 영구 기각(a1_judge_verdict.md B3).
 """
 import json
 import sys
