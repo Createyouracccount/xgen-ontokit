@@ -1687,3 +1687,16 @@ def test_occupation_typing_wired_in_extractor(monkeypatch):
                                        auto_english=False, enable_hearst=False)
     _m2, ents2, _r2, _d2 = asyncio.run(ex2.extract(docs))
     assert all(e["class"] == "인물" for e in ents2["doc"] if e["entity"] == "박재범")
+
+
+def test_occupation_evidence_cue_gate():
+    """B7 단서 게이트 회귀 — 재입장·기업그룹 비관통·우경계(잠복 관통 차단)."""
+    from ontokit.instance_typing.occupation import _evidence_ok
+
+    # 단서 회수(걸그룹/멤버) — B1 오살 복귀
+    assert _evidence_ok("안유진", "가수", ["걸그룹 아이브의 멤버 안유진이 화제"], "adj")
+    # 기업집단 '그룹' 비관통 — 송승현 재입장 차단(KG그룹 문맥)
+    assert not _evidence_ok("송승현", "가수", ["KG그룹 회장은 5일 ... 송승현 기자"], "adj")
+    # 우경계: '음원 이용료' 의 '이용' 관통 차단, 조사 결합은 통과
+    assert not _evidence_ok("이용", "가수", ["음원 이용료 인상 논의"], "adj")
+    assert _evidence_ok("이용", "가수", ["가수 이용은 신곡을 발표했다"], "adj")

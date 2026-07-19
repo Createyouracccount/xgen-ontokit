@@ -59,6 +59,30 @@ def load_occupation_lexicon(path: Optional[str] = None) -> dict[str, list[dict]]
 SHORT_LABEL_MAX = 3   # 증거 게이트 대상: 정규화 3자 이하(모노님·절단·동명이인 위험대)
 ADJ_WINDOW = 15       # adj 모드 인접 창(자)
 
+# 개념별 증거 단서 어휘(B7 확장). 기존 7개념은 뉴스 전량 채점 **실측**(직업어
+# 단독 대비 오살 3→0·오탐 재입장 0, wiki2 오살 41→32). ⚠️신규 8개념(배우~언론인)
+# 단서는 뉴스에서 발화 0건인 **설계 외삽** — 도메인 코퍼스 실측 전(B7 심판 D1 공시).
+# '그룹' 단독은 기업집단('KG그룹')이 관통해 제외 — 걸그룹/보이그룹만.
+# 미등재 개념은 직업어 자신만 사용.
+EVIDENCE_CUES: dict[str, list[str]] = {
+    "가수": ["가수", "노래", "신곡", "앨범", "컴백", "아이돌", "걸그룹", "보이그룹",
+             "멤버", "보컬", "음원", "데뷔곡"],
+    "작곡가": ["작곡", "프로듀서", "음악", "히트곡", "멤버"],
+    "소설가": ["소설", "작가", "출간"],
+    "물리학자": ["물리", "과학자"],
+    "수학자": ["수학"],
+    "철학자": ["철학", "사상"],
+    "화가": ["화가", "그림", "미술", "전시"],
+    "배우": ["배우", "출연", "연기", "드라마", "영화", "주연", "조연", "캐스팅"],
+    "시인": ["시인", "시집"],
+    "정치인": ["정치", "의원", "장관", "대통령", "총리", "당대표", "선거"],
+    "화학자": ["화학", "과학자"],
+    "천문학자": ["천문", "과학자"],
+    "역사학자": ["역사학", "사학자", "역사가"],
+    "경제학자": ["경제학", "경제사상"],
+    "언론인": ["언론", "기자", "앵커", "논설"],
+}
+
 
 def _evidence_ok(label: str, concept: str, texts: list[str], mode: str) -> bool:
     """코퍼스 증거 게이트(B1 심판 권고 이행) — 짧은 라벨의 지시체 검증.
@@ -77,11 +101,17 @@ def _evidence_ok(label: str, concept: str, texts: list[str], mode: str) -> bool:
         return True
     if mode == "doc":
         return any((label in t and concept in t) for t in texts)
-    # 라벨 좌경계: 한글 접두 결합('무역수지'의 '수지') 관통 방지 — B1 심판 D1
-    lb = r"(?<![가-힣])" + re.escape(label)
-    pat = re.compile(re.escape(concept) + r".{0,%d}" % ADJ_WINDOW + lb
-                     + "|" + lb + r".{0,%d}" % ADJ_WINDOW + re.escape(concept))
-    return any(pat.search(t) for t in texts)
+    # 라벨 좌경계: 한글 접두 결합('무역수지'의 '수지') 관통 방지 — B1 심판 D1.
+    # 우경계: 조사 폐집합/비한글/끝만 인정('음원 이용료'의 '이용' 관통 차단,
+    # '가수 이용은'의 조사 결합은 통과) — B7 심판 D3 잠복 적발 선제 차단.
+    lb = (r"(?<![가-힣])" + re.escape(label)
+          + r"(?=[은는이가을를도의와과에로서랑이나든]|[^가-힣]|$)")
+    for cue in EVIDENCE_CUES.get(concept, [concept]):
+        pat = re.compile(re.escape(cue) + r".{0,%d}" % ADJ_WINDOW + lb
+                         + "|" + lb + r".{0,%d}" % ADJ_WINDOW + re.escape(cue))
+        if any(pat.search(t) for t in texts):
+            return True
+    return False
 
 
 def apply_occupation_typing(all_entities: dict[str, list],
