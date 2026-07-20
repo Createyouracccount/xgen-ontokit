@@ -4,23 +4,48 @@
 
 XGEN 온톨로지 **빌드·검색 개선 키트**. 우리가 수정·주입하는 온톨로지 개선을 하나로 말아 XGEN에 주입하는 라이브러리. omnifuse(검색 라이브러리)와 상보 — 이쪽은 **빌드(LLM-free 한국어·영어 추출) + 검색 개선**을 함께 담는다.
 
-## 언어 지원 매트릭스 (v0.10, 정직하게)
+## 언어 지원 매트릭스 (v0.13.1, 정직하게)
 
 | 축 | 한국어 | 영어 | 혼합 청크 |
 |---|---|---|---|
 | 클래스(복합명사) | ✅ Kiwi | ✅ nltk POS (extras[english], **auto-wire**) | ✅ 이중 추출(소수언어 용어 보존) |
-| 계층(subClassOf) | ✅ 문자 접미공유 | ✅ 단어 접미공유(대소문자 무시) | ✅ |
-| 엔티티(NER) | ✅ KoELECTRA(주입) | ✅ dslim BERT MIT(주입) | ⚠️ 지배언어만(비용) |
-| **관계** | ✅ 조사 SVO(규칙) + KLUE-RE 인코더(opt-in) | ❌ **미지원** — 측정 인프라 확보 후 별도 트랙 | 한국어만 |
+| 계층(subClassOf) | ✅ 문자 접미공유 + **정의문(Hearst, 기본 on)** | ✅ 단어 접미공유(대소문자 무시) | ✅ |
+| 엔티티(NER) | ✅ KoELECTRA(주입) | ✅ dslim BERT MIT(주입 또는 `ONTOKIT_NER_EN=auto`) | ⚠️ 지배언어만(비용) |
+| **관계** | ✅ 조사 SVO(규칙) + KLUE-RE 인코더(opt-in) | ✅ **spaCy 의존 SVO(opt-in, v0.13)** | 한국어만 |
+| 인스턴스 타이핑 | ✅ 정의문 + **직업 P106 어휘집(기본 on)** | ❌ 미지원 | 한국어만 |
 | OWL 라벨 | `@ko` | `@en` (자동판정) | 혼재 출력 |
 
 ⚠️ 품질 검증 범위: 한국어=finreg 489 실측, 영어=구조 테스트만(코퍼스 실측 미완).
-관계추출: 규칙 조사SVO(정밀도용, KLUE 연결력 0.8%) + **KLUE-RE 인코더 채널(opt-in,
-외부 gold 심판루프 90/100, holdout micro-F1 0.5924)**. 인코더는 env 로 켜며 미설정 시
-규칙 폴백 — 아래 [관계 인코더](#관계-인코더-v012--klue-re-외부-gold-심판루프-90) 참조.
+관계추출: 규칙 조사SVO는 **가용성 폴백 전용**으로 지위 확정(앙상블 영구 기각, B3) +
+**KLUE-RE 인코더 채널(opt-in, holdout micro-F1 0.6274 — 외부 gold KLUE-RE)**.
+인코더는 env 로 켜며 미설정 시 규칙 폴백 — 아래 [관계 인코더](#관계-인코더-v013--klue-re--sredfm-ko-증강-holdout-06274) 참조.
 ⚠️ v0.5 대비 동작 변화: `auto_english=True` 기본이라 **라틴 약어가 섞인 한국어 코퍼스에
 영어 클래스가 새로 추가**된다(순수 한글 코퍼스는 출력 완전 동일 — finreg 489 실측).
 기존 동작 유지가 필요하면 `auto_english=False`.
+⚠️ v0.11 대비 동작 변화: `enable_hearst=True`(정의문 이질계층), `enable_occupation=True`
+(직업 타이핑)가 **기본 on** — 순수 접미공유 출력과 다르다. 되돌리려면 각각 `False`.
+
+### 기본값 / env 스위치 한눈에
+
+무인자 생성(`DeterministicKoreanExtractor()`) 시 켜지는 것과, env 로만 켜지는 것의 구분:
+
+| 채널 | 기본 | 스위치 | 모델 로드 |
+|---|---|---|---|
+| 한국어 클래스·접미공유 계층 | **on** | — | 없음(Kiwi) |
+| 영어 클래스 | **on**(nltk 설치 시) | `auto_english=False` | 없음(nltk POS) |
+| 정의문 계층·타이핑(Hearst) | **on** | `enable_hearst=False` | 없음(규칙) |
+| 직업 타이핑(P106) | **on** | `enable_occupation=False` / `ONTOKIT_OCCUPATION_TYPING=off` | 없음(동봉 어휘집) |
+| 한국어 관계(조사 SVO) | **on** | `enable_relations=False` | 없음(Kiwi) |
+| 관계 인코더(KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers(로컬) |
+| 영어 NER | off | `ONTOKIT_NER_EN=auto` | transformers(로컬) |
+| 영어 관계(spaCy) | off | `ONTOKIT_RELATION_EN=auto` | spaCy |
+| 보조 NER union | off | `ONTOKIT_NER_AUX_MODEL` | transformers(로컬) |
+| 사전 동의어 병합 | off | `ONTOKIT_SYNONYM_DICT` | 없음(TSV) |
+
+**불변식**: 기본 경로는 **LLM 호출 0회 · transformers 로드 0회**. 모델을 쓰는 채널은
+전부 env opt-in 이고, 기본 on 인 신규 채널(직업 타이핑)도 패키지 동봉 어휘집만 읽는다
+(네트워크 0). 유일한 LLM 경로는 `relation_hybrid.HybridRelationExtractor` 로,
+`relation_extractor=` 로 **명시 주입**해야만 진입하며 예산 0 이면 순수 규칙과 동치다.
 
 ## 철학
 - **코어 의존성 0** — 백엔드·모델(kiwipiepy/transformers/httpx)은 전부 extras.
@@ -34,6 +59,8 @@ pip install "xgen-ontokit[korean]"       # + Kiwi 형태소
 pip install "xgen-ontokit[ner]"          # + KoELECTRA NER
 pip install "xgen-ontokit[relation-encoder]"  # + KLUE-RE 관계 인코더(opt-in)
 pip install "xgen-ontokit[all]"          # 전부
+# 영어 관계(opt-in)는 전용 extra 미정의 — 직접 설치:
+#   pip install spacy && python -m spacy download en_core_web_sm
 # GitHub 직접:
 pip install "git+https://github.com/<org>/xgen-ontokit.git"
 ```
@@ -91,21 +118,63 @@ edges = col.edges(exclude_pairs=svo_pairs)      # [(a, b, count)] — SVO 기연
 ⚠️coarse 관계(종류 없음), 소비측은 SVO 우선 + co-occ 폴백 슬롯. 잘림·병합 파편(`대구광역`)은
 형태 판별 밖(상류 NER). 근거: `docs/관계밀도_coOccursWith_확충_2026_07_12.md`.
 
-## 관계 인코더 (v0.12) — KLUE-RE 외부 gold 심판루프 90
+## 관계 인코더 (v0.13) — KLUE-RE + SREDFM-ko 증강, holdout 0.6274
 ```bash
 pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
 export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # 이 env가 on/off 스위치
 ```
 규칙 조사SVO(KLUE 연결력 0.8%)를 넘는 **로컬 RE 인코더** 채널. klue/roberta-small
-파인튜닝, **LLM API 호출 0회**(로컬 추론, NER 과 동일 계열). 외부 gold(KLUE-RE,
-CC BY-SA) 심판루프 90/100, holdout micro-F1 0.5924(공식 baseline 60.89 정합).
+파인튜닝, **LLM API 호출 0회**(로컬 추론, NER 과 동일 계열).
+
+**채택 이력** (외부 gold = KLUE-RE 공식 validation 7,765, micro-F1):
+
+| 버전 | holdout | 비고 |
+|---|---|---|
+| re-ko-v1 | 0.5924 | KLUE 공식 roberta-small baseline 60.85 정합 |
+| re-ko-aug-v1 | 0.6259 | SREDFM-ko 증강 |
+| **re-ko-aug-v12 (현재)** | **0.6274** | P112 무근거행 721 제거 — `founded_by` 0.519→0.696 |
+
+현재 채택본은 `eval/relation/MODEL_LOCK.json` 이 단일 진실원(release_tag·sha256 고정).
+⚠️ 모델 크기는 여전히 **small** — 공식 base 0.6666 / large 0.6959 대비 아래이며,
+증강이 아닌 **모델 크기 상향은 미소진 레버**다(LLM 없이 가능한 남은 개선 여지).
 
 - **불변식**: env 미지정·extras 미설치·경로오류·NER부재 중 하나라도면 규칙 조사SVO 폴백.
   "설치·설정 안 하면 안 켜진다". NER(KoELECTRA)이 준 개체를 쌍으로 조합→관계 분류.
+- **규칙 채널 지위**(B3 확정): 규칙 조사SVO 는 **가용성 폴백 전용**. 인코더와의 앙상블은
+  **영구 기각** — holdout 실측에서 규칙 단독 보정 29건 vs 오염 144건으로 순가치 음수.
 - **모델 교체**: 특정 모델 미종속. ①env 변경 ②`eval/relation/train_encoder.py` 재학습
   ③`relation_extractor=` 주입 ④`.extract()` 래퍼 — `eval/relation/README.md` '모델 교체'.
 - 재현·평가: `eval/relation/`(train_encoder.py·eval_encoder.py·gold). 가중치는
-  스크립트로 재현(git 미커밋). 근거: `docs/ontokit_관계_KLUE-RE_인코더_심판루프_90_2026_07_14.md`.
+  Release 자산으로 배포(git 미커밋). 근거: `docs/ontokit_관계_KLUE-RE_인코더_심판루프_90_2026_07_14.md`.
+
+## 정의문 계층·타이핑 (v0.12~) — 이질계층 유도 (기본 on)
+접미공유가 **원리적으로 불가능한** 이질계층(강아지⊂동물, 신용공여⊂거래)을 정의문
+종결패턴(계사/genus/서술/속하는)으로 유도한다. `enable_hearst=True` 가 기본.
+
+```python
+ext = DeterministicKoreanExtractor(enable_hearst=True)   # 기본값
+```
+- **ABox↔TBox 브리지**: 정의문 주어가 NER 엔티티면 `subClassOf` 대신 `rdf:type` 으로
+  방출 — 계층 도달률 0% 였던 고립 섬 문제를 수복.
+- 전부 규칙(Kiwi 형태소 + 종결패턴). LLM 0콜.
+- ⚠️ **근거 수준**: 외부 gold(Wikidata P279) 심판루프 89/100 및 실빌드 615건·정밀도 87%
+  는 **개발 라운드의 자체 심판·커밋 기록**이며, `eval/hierarchy/` 에 재현 가능한 산출물로
+  아직 랜딩되지 않았다. 재현 하네스 정비는 미완 — 이 수치는 그 전제에서 읽을 것.
+
+## 직업 인스턴스 타이핑 (v0.13) — P106 어휘집 (기본 on)
+인물 엔티티에 직업 클래스를 부여하는 빌드타임 채널. 열거(enum) 천장의 병목이
+"통로가 아니라 물"(코퍼스 내 직업 타이핑 희박)이라는 진단에서 나온 외부지식 주입.
+
+```python
+ext = DeterministicKoreanExtractor(enable_occupation=True)   # 기본값
+# 끄기: enable_occupation=False 또는 ONTOKIT_OCCUPATION_TYPING=off
+```
+- 어휘집 `data/occupation_lexicon_ko.json.gz`(4,121쌍) — SREDFM-ko P106 표면형 +
+  Wikidata 후보 중 **블라인드 2인 합의 정탐만**(348, 인간 검증). **패키지 동봉 = 빌드
+  네트워크 0**, 모델 로드 0, LLM 0콜.
+- 게이트: 인물지배 컷(동음이의 방어) + 증거 게이트(`ONTOKIT_OCCUPATION_EVIDENCE=adj`
+  기본). 도메인 오탐 63.6%→0% 실측(자체 측정, 외부 gold 아님).
+- 복수 직업(갈릴레이=물리학자·수학자)은 추가 레코드로 방출 → `rdf:type` 복수 자연 지원.
 
 ## 검색 개선
 ```python
@@ -128,9 +197,14 @@ from ontokit.search import class_instances_triple, blend_score
 src/ontokit/
 ├── protocols.py          # 주입 인터페이스 (Extractor/GraphStore/VectorStore/LLM)
 ├── extractors/           # deterministic_ko(핵심, 한·영 이중추출) + base(merge_concepts)
+│                         #   relation_ko(조사 SVO) / relation_encoder_ko(KLUE-RE, opt-in)
+│                         #   relation_en(spaCy 의존 SVO, opt-in) / relation_hybrid(⚠️LLM, 주입 전용)
 ├── morphology/           # kiwi_nouns(한국어) + en_nouns(영어 nltk POS)
-├── hierarchy/            # suffix_share(접미공유·주엔진, ko=문자/en=단어), hearst_ko(확장)
-├── ner/                  # koelectra(ko) + english(dslim BERT MIT)
+├── hierarchy/            # suffix_share(접미공유·주엔진, ko=문자/en=단어), hearst_ko(정의문, 기본 on)
+├── instance_typing/      # occupation(P106 어휘집·기본 on) + evidence + hygiene (v0.13)
+├── ner/                  # koelectra(ko) + english(dslim BERT MIT) + ensemble·span_align
+├── dedup/                # deterministic(형태소) + synonym_dict(우리말샘, opt-in)
+│                         #   class_synonyms(TBox 후보 제안 — 병합 안 함, 오프라인 검토용)
 ├── citations.py          # doc-level :cites 인용 수집·SPARQL 방출 (v0.8)
 ├── filter/               # class_promotion — termhood 승격 게이트 (v0.9)
 ├── cooccurrence.py       # coOccursWith 동시출현 약관계 — 관계밀도 확충 (v0.10)
@@ -146,7 +220,7 @@ src/ontokit/
 
 ```bash
 pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git"
-# 버전 고정(권장): ...xgen-ontokit.git@v0.10.0
+# 버전 고정(권장): ...xgen-ontokit.git@v0.13.1
 ```
 
 XGEN `pyproject.toml` dependencies 또는 requirements에 위 URL 추가.
