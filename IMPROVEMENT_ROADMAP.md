@@ -1,36 +1,58 @@
-# ontokit 개선 로드맵 (2026-07-10, 상태갱신 07-12)
+# ontokit 개선 로드맵 (2026-07-10, 상태갱신 07-20 / v0.13.1)
 
-> **0712 상태갱신**: 이 문서 이후 v0.8 인용 온톨로지(`citations.py`)·v0.9 클래스
-> 승격 필터(`filter/class_promotion.py`)가 추가됐다. v0.9 필터는 아래 "노이즈 관리
-> 원칙 1순위(빈도/허브 필터)"의 클래스판 구현이다(df≥2 ∨ 구조참여, 목록 0).
-> Tier 1 두 항목(Hearst 정의문 배선, co-occurrence 관계)은 **여전히 미착수** —
-> 관계 밀도(트리플의 1.1%) 확충의 직접 레버로 유효하다.
+> **0720 상태갱신 — Tier 1 두 항목 모두 종결.**
+> - **Tier 1-1 Hearst 정의문 배선 → ✅ 완료.** `definitional_pairs()` 가
+>   `deterministic_ko.py:305` 에서 호출되고 `enable_hearst=True` 가 **기본 on**.
+>   `assign_definitional_types()` 로 ABox↔TBox 브리지까지 추가(계층 도달률 0% 수복).
+> - **Tier 1-2 co-occurrence → ✅ 완료(v0.10).** `cooccurrence.py` 로 구현,
+>   `coOccursWith` 약관계 방출. 단 **소비측 배선 방식** — extractor 내부가 아니라
+>   호출측이 `CooccurrenceCollector` 를 직접 쓴다(public export).
+>
+> 이 문서 이후 추가된 것: v0.8 인용(`citations.py`), v0.9 클래스 승격 필터
+> (아래 "노이즈 관리 1순위 빈도/허브 필터"의 클래스판), v0.10 co-occurrence,
+> v0.12 관계 인코더·정의문 계층, v0.13 직업 타이핑(P106).
+> **현재 남은 레버는 아래 [0720 갱신 로드맵](#0720-갱신--지금-남은-레버) 참조.**
+> (이 문서 원본의 Tier 분류는 0710 시점 기록으로 보존한다.)
 
 한국어 LLM-free 온톨로지 추출기(ontokit)의 남은 개선 여지를 정리한다. 두 조사
 문서(`docs/프롬프트/ontology_search.txt`, `ontology_prompt_all.txt`)의 39개 기법과
 현재 구현을 대조하고, "반영 가능성 × 효과 × 비용"으로 우선순위를 매겼다.
 
-## 현재 구현 상태 (baseline)
+## 현재 구현 상태 (baseline — 0720/v0.13.1 기준 갱신)
 
 `DeterministicKoreanExtractor`가 실제 배선한 것:
 
 | 컴포넌트 | 방식 | 상태 |
 |---|---|---|
-| 클래스 추출 | Kiwi 복합명사(`kiwi_nouns`) | ✅ 배선 |
-| 계층(subClassOf) | 접미공유(`suffix_share`) | ✅ 배선 |
-| 엔티티(인스턴스) | KoELECTRA/EnglishNER | ✅ 배선(주입 시) |
-| 관계(objectProperty) | 조사 기반 SVO(`relation_ko`) | ✅ 배선(0710 신규) |
-| dedup | Kiwi 형태소 정규화(`deterministic`) | ✅ 배선 |
+| 클래스 추출 | Kiwi 복합명사(`kiwi_nouns`) | ✅ 기본 on |
+| 계층(subClassOf) | 접미공유(`suffix_share`) | ✅ 기본 on |
+| 계층 — 이질 상위어 | 정의문(`hearst_ko`) + ABox↔TBox 브리지 | ✅ **기본 on (0712~, 신규)** |
+| 엔티티(인스턴스) | KoELECTRA/EnglishNER | ✅ 주입 시 |
+| 인스턴스 타이핑 | 직업 P106 어휘집(`instance_typing`) | ✅ **기본 on (0719, 신규)** |
+| 관계(objectProperty) | 조사 기반 SVO(`relation_ko`) | ✅ 기본 on — **가용성 폴백 전용**으로 지위 확정 |
+| 관계 — 인코더 | KLUE-RE+SREDFM 증강(`relation_encoder_ko`) | ⚙️ **env opt-in (신규)** holdout 0.6274 |
+| 관계 — 약관계 | `coOccursWith`(`cooccurrence`) | ⚙️ **소비측 배선 (신규)** |
+| 관계 — 영어 | spaCy 의존 SVO(`relation_en`) | ⚙️ **env opt-in (신규)** |
+| 클래스 승격 필터 | termhood 게이트(`filter/class_promotion`) | ✅ **(0712, 신규)** |
+| dedup | Kiwi 형태소 정규화(`deterministic`) | ✅ 기본 on |
+| dedup — 사전 동의어 | 우리말샘(`synonym_dict`) | ⚙️ env opt-in |
+| 인용(`:cites`) | 정규식(`citations`) | ✅ **(0712, 신규)** |
 | OWL 생성 | 결정적(`owl/generator`) | ✅ 배선 |
 
 관계 노이즈 정제(띄어쓰기 경계)까지 완료 — 위키 30문서 노이즈 20%→2%.
+**LLM-free 불변식 유지**: 기본 경로는 LLM 0회·transformers 로드 0회. 모델 채널은 전부
+env opt-in, 기본 on 인 직업 타이핑도 패키지 동봉 어휘집만 읽는다(네트워크 0).
 
 ## 미반영 기법 분류
 
-### 🟢 Tier 1 — 저비용·고효과 (착수 권장)
+### 🟢 Tier 1 — 저비용·고효과 (✅ 둘 다 완료, 0720)
 
-**1. Hearst 정의문 계층 배선** (기법 19)
-- 현황: `hierarchy/hearst_ko.py`에 `definitional_pairs()` **구현돼 있으나 호출처 0**(미배선).
+**1. Hearst 정의문 계층 배선** (기법 19) — ✅ **완료(v0.12)**
+- 0710 현황(당시): `hierarchy/hearst_ko.py`에 `definitional_pairs()` **구현돼 있으나 호출처 0**(미배선).
+- **0720 결과**: `deterministic_ko.py:305` 배선, `enable_hearst=True` 기본 on.
+  ABox↔TBox 브리지(`assign_definitional_types`) 추가로 계층 도달률 0% 결함 수복.
+  ⚠️ 아래 예상 수치(정밀도 89.7% 계열)는 당시 문헌 근거였고, 실제 채택 라운드의
+  자체 실측은 615건·정밀도 87%다 — **재현 산출물은 `eval/hierarchy/` 에 미랜딩**.
 - 효과: 접미공유가 못 잡는 **이질 상위어**(`강아지 ⊂ 동물`처럼 접미 안 겹침) 계층 유도.
   정형 텍스트(법령·규정·위키 정의문)에서 정밀도 89.7% 계열.
 - 비용: 매우 낮음. `definitional_pairs(text, self.nouns.last_noun)`을 청크 루프에서
@@ -40,8 +62,13 @@
   제한돼 있어 보수적. KorLex 검증(기법 22)이 이상적이나 자원 부재(아래) → 없이도
   정의문 한정이면 순이득 가능. **A/B로 순도 측정 후 기본 on/off 결정.**
 
-**2. co-occurrence 관계 보완** (기법 12)
-- 현황: 없음. 조사규칙(`relation_ko`)이 못 잡는 관계(조사 생략·복잡 문장)는 누락.
+**2. co-occurrence 관계 보완** (기법 12) — ✅ **완료(v0.10)**
+- 0710 현황(당시): 없음. 조사규칙(`relation_ko`)이 못 잡는 관계(조사 생략·복잡 문장)는 누락.
+- **0720 결과**: `cooccurrence.py` 구현. predicate 는 아래 제안한 `relatedTo` 가 아니라
+  **`coOccursWith`** 로 명명. 선별은 통계만(pair df≥3 ∧ lift>2, 목록 0) + 형태·품사
+  라벨 자격 게이트, 허브 폭발 방지는 node degree cap. 사내 실측 1.75%→10.5%, SVO 100% 보존.
+  ⚠️ **배선 위치 주의**: extractor 내부가 아니라 **소비측이 직접 쓰는** public 컴포넌트다
+  (`from ontokit import CooccurrenceCollector`). 무인자 `extract()` 만으로는 방출되지 않는다.
 - 효과: 같은 청크에 동시출현한 엔티티쌍을 약한 관계(`relatedTo`)로 연결 → 관계 recall↑.
   synaptic/FastGraphRAG의 핵심. "coarse하지만 검색 보완" 실증.
 - 비용: 낮음. `all_entities`가 **이미 청크별로 수집됨**(`source_chunks` 보유) —
@@ -66,10 +93,13 @@
 ### 🔴 Tier 3 — 자원/라이선스 막힘 (현재 불가)
 
 **5. KorLex/CoreNet 계층 검증** (기법 22, "최고 레버리지")
-- 현황: `korlex.pusan.ac.kr`·`semanticweb.kaist.ac.kr` **둘 다 DNS 실패**(0710 재확인).
-  대안 KWN(`catSirup/KorEDA` pickle)은 계층 포함 여부·라이선스 미확정.
+- 현황: `korlex.pusan.ac.kr`·`semanticweb.kaist.ac.kr` **둘 다 DNS 실패**(0710 확인,
+  **0720 재확인에도 동일**). 대안 KWN(`catSirup/KorEDA` pickle)은 계층 포함 여부·라이선스 미확정.
 - 효과: 계층 오탐 제거의 최고 레버리지(57%→사용가능). 하지만 자원이 없으면 불가.
 - 판정: **KWN pickle 실물 확보·검증이 선결**. 없으면 착수 불가.
+- **0720 대체 경로**: KorLex 를 기다리지 말고 **우리말샘 상하위어**로 간다(위 3순위).
+  CC BY-SA·110만 표제어·덤프 확보 가능 = 살아있는 유일한 한국어 상하위어 자원이다.
+  KorLex/KWN/ETRI/ko.dbpedia 는 실사용 자원으로 **기대하지 않는다**.
 
 ### ⚫ Tier 4 — 배제 (한국어/라이선스/방향 부적합)
 
@@ -77,15 +107,61 @@
   gliner_ko(비상용), gleaning(LLM 비용 증가=역방향), Stanza 의존구문 RE(무거운 의존성
   +Kaist 트리뱅크 라이선스, 조사규칙 대비 과투자).
 
-## 착수 방향 (권장 순서)
+> **0720 재검토**: GLiNER 계열은 0718 실측으로 **전원 기각 재확인**(게이트 미달).
+> 반면 **의존구문 RE 의 배제 근거는 일부 소멸**했다 — 영어 채널에 이미 spaCy 를
+> 도입했고(`relation_en`), spaCy 한국어 파이프라인(LAS 0.814)은 Stanza 대비 가볍다.
+> 우선순위는 낮지만 "영구 배제"는 아니다(위 4순위).
 
-1. **Hearst 정의문 계층 배선** (Tier 1-1) — 저비용, 계층 recall↑, A/B로 순도 검증
-2. **co-occurrence 관계** (Tier 1-2) — 관계 recall↑, 기존 엔티티 재사용
-3. (조건부) KWN 확보되면 → Hearst+KorLex 검증으로 계층 정밀도↑
+## 착수 방향 (0710 원안 — 1·2 완료, 기록 보존)
+
+1. ~~**Hearst 정의문 계층 배선** (Tier 1-1)~~ → ✅ 완료(v0.12)
+2. ~~**co-occurrence 관계** (Tier 1-2)~~ → ✅ 완료(v0.10)
+3. (조건부) KWN 확보되면 → Hearst+KorLex 검증으로 계층 정밀도↑ → 여전히 자원 부재
 
 각 착수는 실측(빌드→triple 수·품질 스팟체크) 후 커밋. 검증 축 주의: 검색 recall은
 벡터 leg가 캐리(기법 34)하므로 **계층/관계 개선은 카운트·전수열거·관계질의 GT로 측정**
 해야 효과가 보인다(검색 A/B로는 0.947 그대로).
+
+## 0720 갱신 — 지금 남은 레버
+
+Tier 1 종결 후 재산정. **전부 LLM 없이 가능한 것부터** 정렬했다.
+
+### 1순위 — 검증 부채 상환 (기능 추가 아님)
+가장 시급한 건 새 기능이 아니라 **이미 한 주장의 근거를 랜딩하는 것**이다.
+- **계층 축 재현 산출물 미랜딩**: 89/100·정의문 615건·정밀도 87% 는 자체 심판과
+  커밋 메시지에만 있고 `eval/hierarchy/` 결과 로그에는 R0 26/100·"R1 진행 중"뿐이다.
+  → `eval/hierarchy/` 하네스로 R1 을 실제 재실행해 수치를 랜딩할 것.
+- **외부 gold 앵커는 관계(0.6274)·ER(0.776) 둘뿐**. 나머지 "NN/100" 은 전부 자체 심판.
+  외부 재채점이 아님을 문서에 명시했으나(README), 근본 해소는 재현 하네스 정비다.
+
+### 2순위 — 관계 인코더 모델 크기 (LLM-free, 효과 최대)
+현재 채택본은 **klue/roberta-small** 계열 증강본(holdout 0.6274). KLUE 공식 baseline 은
+small 0.6085 / base 0.6666 / **large 0.6959** 다.
+- → **base·large 로 올리는 것만으로 +3~7pp** 가 남아 있다. 증강(+3.5pp)은 이미 소진했고,
+  크기 상향은 **미소진 레버**다. 비용은 추론 시간·메모리(로컬 CPU 추론 전제 재검토 필요).
+- 앙상블은 **영구 기각**(B3) — 규칙 채널과의 앙상블은 순가치 음수로 실측됐다.
+
+### 3순위 — 이질 상위어 recall (우리말샘 상하위어 주입)
+정의문 채널로 일부 열었으나, Hearst 계열은 **원리적으로 고정밀·저재현**이다
+(문헌: Hearst 단독 F≈0.12~0.15). 남은 갭의 올바른 non-LLM 처방:
+- **우리말샘(CC BY-SA, 110만 표제어)의 상위어/하위어 관계 주입**. 현재 우리말샘은
+  동의어 채널로만 쓰이고(`ONTOKIT_SYNONYM_DICT`, opt-in), **상하위어는 미활용**이다.
+- 선결: 실제 XML 덤프에 상하위어 필드 커버리지가 얼마나 되는지 로컬 확인.
+- KorLex/KAIST KWN 은 0720 재확인에도 **DNS 실패 지속** → 우리말샘이 유일한 살아있는 대체재.
+
+### 4순위 — 의존파싱 기반 관계 (조사 SVO 천장 돌파)
+조사 SVO 는 Kiwi 가 **의존 아크를 주지 않아** 표면 조사 휴리스틱에 머문다(F 0.309/R 0.158).
+- spaCy `ko_core_news_lg` 는 한국어 의존파싱 **LAS 0.814** 를 제공한다(영어 0.939 대비 낮음).
+- 0710 당시 "Stanza 의존구문 RE"는 Tier 4(배제)였으나, **영어 채널에서 이미 spaCy 를
+  도입했으므로**(`relation_en`) 한국어에도 같은 방식이 가능해졌다 — 배제 근거 일부 소멸.
+- 단 규칙 채널은 이미 "가용성 폴백 전용"으로 지위가 내려갔으므로, 인코더(2순위) 대비
+  투자 우선순위는 낮다.
+
+### 구조적으로 남는 갭 (LLM 없이는 안 닫힘)
+개방도메인·암묵 관계 recall 은 규칙+폐쇄라벨 인코더로는 원리적 한계다. 필요해지면
+**예산 가드된 선별 LLM top-up**(`relation_hybrid`, 이미 구현·기본 off)이 정당한 자리다.
+업계도 같은 방향이다 — Microsoft LazyGraphRAG 는 인덱싱을 LLM 에서 떼어내 결정적
+NLP 로 옮겼고(인덱싱 비용 0.1%), 권장 아키텍처는 "결정적 코어 + 선별 LLM"이다.
 
 ## 노이즈 관리 원칙 (관리포인트) — ⚠️ 필독
 
@@ -124,3 +200,10 @@
   (위키)는 노이즈 상존. gpt-4o 대비 관계/계층 recall 갭은 설계상 존재(벡터 leg가 보완).
 - 한국어 triple 품질의 상한은 결정적 규칙의 한계. 고품질이 필수면 hybrid top-up
   (고가치 청크만 LLM, 기법 31)이 다음 단계.
+- **(0720 추가) ER 은 미탑재**다. 임베딩이 동의어와 주제근접을 코사인으로 원리적
+  미분리(AUC 천장 ~0.81), 3채널 union 도 balanced F1 0.776 < 게이트 0.80.
+  "LLM-free 로 0.80 안정통과 불가"가 실측 결론이며 의도적으로 배선하지 않았다.
+- **(0720 추가) 세밀 타이핑은 폐기**됐다(재타입 0.16%, `eval/instance_typing/`).
+  Kiwi 사전화 + NER 표면형이 비합성 고유명이라 구조적으로 여지가 없다.
+- **(0720 추가) 규칙 관계 채널은 가용성 폴백 전용**으로 지위가 확정됐다(B3).
+  인코더와의 앙상블은 순가치 음수(보정 29 vs 오염 144)로 **영구 기각**.
