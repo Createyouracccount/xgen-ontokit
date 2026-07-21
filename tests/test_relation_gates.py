@@ -92,3 +92,25 @@ def test_pairs_sentence_scope():
 
 def test_default_min_score_raised():
     assert DEFAULT_MIN_SCORE == 0.5
+
+
+def test_min_score_env_override(monkeypatch):
+    # conf 스윕 라운드(0722): env ONTOKIT_RELATION_CONF_MIN 배선.
+    # 우선순위 = 명시 인자 > env > 기본 0.5. 파싱 실패는 기본값 폴백.
+    monkeypatch.setenv("ONTOKIT_RELATION_CONF_MIN", "0.7")
+    enc = KoreanRelationEncoder(model="dummy")
+    assert enc._min_score == 0.7
+    enc2 = KoreanRelationEncoder(model="dummy", min_score=0.55)
+    assert enc2._min_score == 0.55  # 명시 인자가 env 를 이긴다
+    monkeypatch.setenv("ONTOKIT_RELATION_CONF_MIN", "not-a-float")
+    assert KoreanRelationEncoder(model="dummy")._min_score == DEFAULT_MIN_SCORE
+    monkeypatch.delenv("ONTOKIT_RELATION_CONF_MIN")
+    assert KoreanRelationEncoder(model="dummy")._min_score == DEFAULT_MIN_SCORE
+
+
+@pytest.mark.parametrize("bad", ["nan", "NaN", "inf", "-inf", "-0.3"])
+def test_min_score_env_rejects_nonfinite(monkeypatch, bad):
+    # 주심 D5(0722): float("nan") 파싱 성공 → score<nan 항상 False → 게이트 조용한
+    # 무력화. nan/inf/음수는 거부하고 기본값 폴백해야 한다.
+    monkeypatch.setenv("ONTOKIT_RELATION_CONF_MIN", bad)
+    assert KoreanRelationEncoder(model="dummy")._min_score == DEFAULT_MIN_SCORE

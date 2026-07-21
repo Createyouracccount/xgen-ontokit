@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 import logging
+import math
 import os
 import re
 import threading
@@ -74,6 +75,8 @@ MAX_LEN = 180
 # 차단분 층화 30 오살 0/30. 전부 결정론·LLM 0콜.
 # 기본 conf 하한(G3) — 분포 중첩(FABRICATED 중앙값 0.878)으로 판별력 낮음이 공시된 보조
 # 게이트. 저확신 꼬리(방향/술어 오류 0.66~0.71)만 제거. CORRECT min 0.498 대비 0.5.
+# env ONTOKIT_RELATION_CONF_MIN 으로 조정(conf 스윕 라운드 0722 — 공시는
+# eval_runs/relations/v13_disclosure.md §conf 스윕. 기본 0.5 유지, 상향은 별도 결정).
 DEFAULT_MIN_SCORE = 0.5
 
 # NER(TTA/modu-ner)이 실제로 방출하는 확정 클래스 집합 — 여기 없는 클래스(또는 무클래스)는
@@ -227,7 +230,7 @@ class KoreanRelationEncoder:
     ENV_MODEL = "ONTOKIT_RELATION_ENCODER_MODEL"
 
     def __init__(self, model: Optional[str] = None, ner=None, *,
-                 pipeline=None, min_score: float = DEFAULT_MIN_SCORE):
+                 pipeline=None, min_score: Optional[float] = None):
         self._model = model or os.getenv(self.ENV_MODEL)
         if not self._model:
             raise ValueError(
@@ -235,6 +238,26 @@ class KoreanRelationEncoder:
                 "학습: eval/relation/train_encoder.py → model_re/")
         self._ner = ner
         self._pipe = pipeline
+        # conf 하한 우선순위: 명시 인자 > env ONTOKIT_RELATION_CONF_MIN > 기본 0.5.
+        # 주심 D5(0722): float("nan") 은 파싱에 성공하지만 score<nan 이 항상 False 라
+        # conf 게이트가 조용히 무력화된다 — nan/inf/음수/파싱실패 전부 거부하고
+        # 기본값 폴백 + 경고 로그. (NER ONTOKIT_NER_MIN_SCORE 의 동일 관용은 별건.)
+        if min_score is None:
+            min_score = DEFAULT_MIN_SCORE
+            raw = os.getenv("ONTOKIT_RELATION_CONF_MIN")
+            if raw is not None:
+                try:
+                    val = float(raw)
+                    if math.isfinite(val) and val >= 0:
+                        min_score = val
+                    else:
+                        logger.warning(
+                            "ONTOKIT_RELATION_CONF_MIN=%r 거부(nan/inf/음수) — "
+                            "기본 %s 사용", raw, DEFAULT_MIN_SCORE)
+                except ValueError:
+                    logger.warning(
+                        "ONTOKIT_RELATION_CONF_MIN=%r 파싱 실패 — 기본 %s 사용",
+                        raw, DEFAULT_MIN_SCORE)
         self._min_score = min_score
         self._lock = threading.Lock()
 
