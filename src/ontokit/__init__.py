@@ -30,7 +30,7 @@ from .citations import (
 from .filter.class_promotion import ClassPromotionFilter, PromotionDecision
 from .cooccurrence import CooccurrenceCollector, default_label_ok, make_korean_label_ok
 
-__version__ = "0.10.0"
+__version__ = "0.13.1"
 __all__ = [
     "Extractor", "GraphStore", "VectorStore", "LLM",
     "DeterministicKoreanExtractor", "merge_concepts",
