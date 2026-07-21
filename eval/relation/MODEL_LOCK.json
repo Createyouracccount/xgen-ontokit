@@ -1,9 +1,10 @@
 {
   "relation_encoder_ko": {
     "version": "re-ko-hard-v13c",
-    "description": "v12 레시피 + 채점확정 하드셋 748행 x1 혼합(인간검수 30건 대조·원장검사). KLUE 0.6169(-1.05pt, 게이트1 문언 FAIL — 패널 3요건 면제), 신선 홀드아웃 정밀도 51.8%(v12 43.1%, +8.7pt), wiki2 26.7%(+5.0pt, 보존 88.6%), 재빌드 열거 178·미타입 16→8·판례 6/8. 패널 조건부 발효 78/100 (2026-07-21, v13_panel_verdict.md). 알려진 회귀: per:colleagues F1 0.418→0.230 = v14 수리부채. 릴리스 업로드 대기(로컬 잠금).",
-    "release_tag": "re-ko-hard-v13c(pending-upload)",
-    "asset": "model_re_v13c/",
+    "description": "v12 레시피 + 채점확정 하드셋 748행 x1 혼합(인간검수 30건 대조·원장검사). KLUE 0.6169(-1.05pt, 게이트1 문언 FAIL — 패널 3요건 면제), 신선 홀드아웃 정밀도 51.8%(v12 43.1%, +8.7pt), wiki2 26.7%(+5.0pt, 보존 88.6%), 재빌드 열거 178·미타입 16→8·판례 6/8. 패널 조건부 발효 78/100 (2026-07-21, v13_panel_verdict.md). 알려진 회귀: per:colleagues F1 0.418→0.230 = v14 수리부채. 릴리스 re-ko-hard-v13c.",
+    "release_tag": "re-ko-hard-v13c",
+    "asset": "model_re_v13c.tar.gz",
+    "asset_sha256": "5145e6616f85497e1fed52c57dfa82283dc4d15e93397bdf3446e3d20874eace",
     "safetensors_sha256": "c79f6200ea0e8d255d8d16048ea06e62000a93380abb91316be88017a7fc648d",
     "env": "ONTOKIT_RELATION_ENCODER_MODEL",
     "watchlist": ["per:colleagues", "org:member_of", "per:title"],
