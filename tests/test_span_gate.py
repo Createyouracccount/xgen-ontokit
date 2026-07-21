@@ -16,7 +16,7 @@ BLOCK = [
     ("독일 헤센주의 마르부르크 부근", "부르크"),               # 좌측 한글 '르'
     ("FRS, 1831년 6월", "183"),                               # 우측 숫자
     ("Waleran IV가 아들을", "ale"),                           # 좌우 라틴
-    ("1919년 10월 16일 태어났다", "1919"),                     # 우측 한글 '년' 비조사
+    # ('1919년'의 '1919'는 수리 1회로 숫자+단위 면제 — REPAIR_KEEP 참조)
     ("남연의 초대 황제 모용덕의 묘호이다", "용덕"),            # 좌측 한글 '모'
     ("일본의 성인 비디오 여배우", "배우"),                     # 좌측 한글 '여'
 ]
@@ -61,6 +61,43 @@ def test_known_limit_son_jeongui():
     text = "소프트뱅크 손정의 회장이"
     i = text.index("손정")
     assert boundary_ok(text, i, i + 2) is True  # '의' 가 관형격 동형이라 통과
+
+
+# ── sg1 수리 1회(0722) 판례 — G1 오살 실측 유형의 연역 보강 ─────────
+REPAIR_KEEP = [
+    ("밍크에서 1998년 6월부터 연재됐다", "1998"),        # 숫자+단위 '년' 관행
+    ("시즌에는 16승을 거두었다", "16"),                   # 숫자+'승'
+    ("현재는 32비트 및 64비트", "32"),                    # 숫자+'비트'
+    ("바젤에서 남쪽으로 58km 떨어져", "58"),              # 숫자+라틴 단위
+    ("급진 군인들의 사회주의", "군인"),                    # 복수접미 들+의
+    ("과학자들과 기술자들은", "과학자"),                   # 들+과
+    ("진압책임자는 조병옥이였고 그는", "조병옥"),          # 비표준 '이였고'
+    ("하동 정씨였던 정치순과", "하동 정씨"),               # '였던'
+    ("마르세유는 겨울엔 온난다습하다", "겨울"),            # 축약 조사 '엔'
+]
+
+REPAIR_BLOCK = [
+    ("FRS, 1831년 6월", "183"),          # 숫자 스팬+우측 숫자 = 절단 유지
+    ("프란시스쿠 드 알메이다가 인도", "알메이"),  # '다가' 계속 차단(축약 '다' 미포함)
+    ("봉기는 11월에 일어났다", "11"),     # 숫자+한글 면제의 공시 비용 — G2 실측
+]
+
+
+@pytest.mark.parametrize("text,span", REPAIR_KEEP)
+def test_repair_keep(text, span):
+    i = text.index(span)
+    assert boundary_ok(text, i, i + len(span)) is True
+
+
+def test_repair_block_unchanged():
+    # 수리가 완화 전용임을 고정 — 대표 절단 판례는 계속 차단
+    for text, span in [REPAIR_BLOCK[0], REPAIR_BLOCK[1]]:
+        i = text.index(span)
+        assert boundary_ok(text, i, i + len(span)) is False
+    # 공시 비용: '[11]월' 은 면제로 통과(G2 17→16, 94% 실측 유지)
+    text, span = REPAIR_BLOCK[2]
+    i = text.index(span)
+    assert boundary_ok(text, i, i + len(span)) is True
 
 
 def test_gate_spans_offsets():
