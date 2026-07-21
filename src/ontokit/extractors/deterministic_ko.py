@@ -9,6 +9,7 @@ XGEN pipeline은 이것을 gpt-4o DocumentOntologyExtractor 대신 주입 가능
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import re
 import threading
 from typing import Optional
@@ -180,6 +181,15 @@ class DeterministicKoreanExtractor:
                     ents = align_spans(text[:1200], ents, kiwi)
                 except Exception:
                     pass
+                # sg1: 어절 경계 게이트 — align 확장 이후 잔여 절단 스팬 차단
+                # ('알메이'다·'패러'데이 류). 기본 off — 채택 게이트+심판 통과 후
+                # on 승격 결정(eval_runs/typing/sg1_rule_design.md).
+                if os.getenv("ONTOKIT_NER_SPAN_GATE", "0") == "1":
+                    try:
+                        from ontokit.ner.span_gate import gate_spans
+                        ents = gate_spans(text[:1200], ents)
+                    except Exception:
+                        pass
                 all_entities.setdefault(doc_name, []).extend(ents)
 
     async def extract(
