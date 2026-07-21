@@ -82,9 +82,10 @@ pip install xgen-ontokit                 # 코어 (의존성 0)
 pip install "xgen-ontokit[korean]"       # + Kiwi 형태소
 pip install "xgen-ontokit[ner]"          # + KoELECTRA NER
 pip install "xgen-ontokit[relation-encoder]"  # + KLUE-RE 관계 인코더(opt-in)
+pip install "xgen-ontokit[english-relations]" # + spaCy 영어 의존 SVO(opt-in)
 pip install "xgen-ontokit[all]"          # 전부
-# 영어 관계(opt-in)는 전용 extra 미정의 — 직접 설치:
-#   pip install spacy && python -m spacy download en_core_web_sm
+# ⚠️ english-relations 는 spaCy 모델을 따로 받아야 한다(PyPI 패키지 아님):
+#   python -m spacy download en_core_web_sm
 # GitHub 직접:
 pip install "git+https://github.com/<org>/xgen-ontokit.git"
 ```
