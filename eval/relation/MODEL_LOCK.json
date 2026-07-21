@@ -1,14 +1,20 @@
 {
   "relation_encoder_ko": {
-    "version": "re-ko-aug-v12",
-    "description": "v1 + P112 무근거행 721 제거(고정셋 순수처치). holdout 0.6274, founded_by 0.519→0.696(+0.177 유의), top_members 회귀 소멸. 심판 90/100 채택 (2026-07-19). v11 은 반려(62/100, 캡 재표집 교란).",
-    "release_tag": "re-ko-aug-v12",
-    "asset": "model_re_aug_v12.tar.gz",
-    "asset_sha256": "3e51d38223da28af6b7552980427d96b2d0656bf3c8017d9ca3417894981cbb7",
-    "safetensors_sha256": "69f3bcfe8a51a45c109c254175976042ad8b96b704d043d254392cb66d6b734a",
+    "version": "re-ko-hard-v13c",
+    "description": "v12 레시피 + 채점확정 하드셋 748행 x1 혼합(인간검수 30건 대조·원장검사). KLUE 0.6169(-1.05pt, 게이트1 문언 FAIL — 패널 3요건 면제), 신선 홀드아웃 정밀도 51.8%(v12 43.1%, +8.7pt), wiki2 26.7%(+5.0pt, 보존 88.6%), 재빌드 열거 178·미타입 16→8·판례 6/8. 패널 조건부 발효 78/100 (2026-07-21, v13_panel_verdict.md). 알려진 회귀: per:colleagues F1 0.418→0.230 = v14 수리부채. 릴리스 업로드 대기(로컬 잠금).",
+    "release_tag": "re-ko-hard-v13c(pending-upload)",
+    "asset": "model_re_v13c/",
+    "safetensors_sha256": "c79f6200ea0e8d255d8d16048ea06e62000a93380abb91316be88017a7fc648d",
     "env": "ONTOKIT_RELATION_ENCODER_MODEL",
-    "watchlist": ["org:member_of", "per:colleagues"],
+    "watchlist": ["per:colleagues", "org:member_of", "per:title"],
     "previous": {
+      "version": "re-ko-aug-v12",
+      "release_tag": "re-ko-aug-v12",
+      "asset_sha256": "3e51d38223da28af6b7552980427d96b2d0656bf3c8017d9ca3417894981cbb7",
+      "safetensors_sha256": "69f3bcfe8a51a45c109c254175976042ad8b96b704d043d254392cb66d6b734a",
+      "note": "holdout 0.6274, 심판 90/100 (0719) — 롤백 지점(colleagues 폴백 후보)"
+    },
+    "previous2": {
       "version": "re-ko-aug-v1",
       "release_tag": "re-ko-aug-v1",
       "asset_sha256": "20b9de19980fb9bd085816556006ba8b4cec33dab501527280538f0720e07949",
