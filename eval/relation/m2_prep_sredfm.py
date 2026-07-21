@@ -10,8 +10,8 @@
 import json, re, collections, random, pathlib
 
 SP = pathlib.Path(__file__).parent
-P = ("/Users/kimdu/.cache/huggingface/hub/datasets--Babelscape--SREDFM/"
-     "snapshots/2732d2834e12e36510aeb2a468163ea2642d55db/data/train.ko.jsonl")
+P = str(pathlib.Path.home() / ".cache/huggingface/hub/datasets--Babelscape--SREDFM/"
+        "snapshots/2732d2834e12e36510aeb2a468163ea2642d55db/data/train.ko.jsonl")
 norm = lambda s: re.sub(r"\s+", "", s or "")
 
 # 무모호 P-id → KLUE 라벨 (subj 타입 제약 포함). 모호/부분중첩 술어는 제외(정직).

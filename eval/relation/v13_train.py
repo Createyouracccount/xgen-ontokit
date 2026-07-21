@@ -9,6 +9,7 @@ v12 레시피(KLUE−tune + SREDFM aug v12_fixed) + 하드셋(채점 확정 ~750
 import collections
 import json
 import os
+import pathlib
 import random
 
 import numpy as np
@@ -18,11 +19,10 @@ from torch.utils.data import DataLoader
 from labels import LABEL2ID
 from train_encoder import BATCH, LR, MODEL, SEED, SPECIALS, REDataset
 
-AUG_PATH = os.getenv("M2_AUG_PATH",
-                     "/Users/kimdu/company/xgen-levelup/eval_runs/relations/m2_aug_v12_fixed.jsonl")
+_EVAL_RUNS = pathlib.Path(__file__).resolve().parents[3] / "eval_runs"
+AUG_PATH = os.getenv("M2_AUG_PATH", str(_EVAL_RUNS / "relations/m2_aug_v12_fixed.jsonl"))
 AUG_CAP = int(os.getenv("M2_AUG_CAP", "8000"))
-HARD_PATH = os.getenv("V13_HARD_PATH",
-                      "/Users/kimdu/company/xgen-levelup/eval_runs/relations/v13_hardset.jsonl")
+HARD_PATH = os.getenv("V13_HARD_PATH", str(_EVAL_RUNS / "relations/v13_hardset.jsonl"))
 UPSAMPLE = int(os.getenv("V13_UPSAMPLE", "16"))
 NO_REL_MAX = 0.35   # 설계 D3 상한
 MAX_EPOCHS = int(os.getenv("V13_EPOCHS", "4"))

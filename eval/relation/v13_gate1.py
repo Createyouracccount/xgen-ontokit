@@ -1,5 +1,6 @@
 """v13 게이트1 — KLUE holdout: v12 vs v13 F1·watchlist 클래스·conf 분포 (설계 v13_design_v2.md 게이트1+조건3)."""
 import json
+import pathlib
 import statistics
 import sys
 
@@ -50,9 +51,9 @@ def main():
               f"| 진관계 conf 중앙값={med:.4f}")
         for w in WATCH:
             print(f"    {w}: {pc.get(w)}")
-    json.dump(out, open(
-        "/Users/kimdu/company/xgen-levelup/eval_runs/relations/v13_gate1_result.json", "w"),
-        ensure_ascii=False, indent=1)
+    result_path = (pathlib.Path(__file__).resolve().parents[3]
+                   / "eval_runs/relations/v13_gate1_result.json")
+    json.dump(out, open(result_path, "w"), ensure_ascii=False, indent=1)
     d_f1 = out["v13"]["micro_f1"]["micro_f1"] - out["v12"]["micro_f1"]["micro_f1"]
     d_conf = out["v13"]["true_conf_median"] - out["v12"]["true_conf_median"]
     print(f"ΔF1={d_f1:+.4f}  Δconf중앙값={d_conf:+.4f}")

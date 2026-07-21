@@ -26,10 +26,11 @@ from labels import LABEL2ID
 from train_encoder import (BATCH, EPOCHS, LR, MODEL, SEED, SPECIALS, REDataset)
 
 import os
+import pathlib
 # 0718b 심판 반려 조치: 캡 재표집 교란(파일 행수→셔플 순열→학습셋 26% 교체) 차단 —
 # 사전 고정셋(M2_AUG_PATH, 캡 기적용)을 주면 캡 로직이 그대로 통과(선착순 캡 무해)
-AUG_PATH = os.getenv("M2_AUG_PATH",
-                     "/Users/kimdu/company/xgen-levelup/eval_runs/relations/m2_sredfm_klue_aug.jsonl")
+AUG_PATH = os.getenv("M2_AUG_PATH", str(
+    pathlib.Path(__file__).resolve().parents[3] / "eval_runs/relations/m2_sredfm_klue_aug.jsonl"))
 AUG_CAP = int(os.getenv("M2_AUG_CAP", "8000"))  # 라벨당 증강 상한
 OUT_DIR = os.getenv("M2_OUT", "model_re_aug_v11")
 

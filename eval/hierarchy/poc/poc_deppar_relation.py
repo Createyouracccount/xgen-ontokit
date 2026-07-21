@@ -10,9 +10,10 @@
 Kiwi 는 의존파싱 불가(LGPL, 형태소만) → 규칙은 인접 조사만 보고 추측.
 """
 from __future__ import annotations
+import pathlib
 import re
 import sys
-sys.path.insert(0, "/Users/kimdu/company/xgen-levelup/xgen-ontokit/src")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "src"))
 
 # ── 테스트 문장 + GT (사람 판정) ──
 # 각 문장의 참 관계쌍(subject, object) — predicate 는 완화매칭
