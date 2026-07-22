@@ -57,9 +57,24 @@ def main():
     base = [r for r in train_all if r["guid"] not in tune_guids] + load_aug()
 
     hard = [json.loads(l) for l in open(HARD_PATH, encoding="utf-8")]
-    random.shuffle(hard)
-    n_dev = max(1, int(len(hard) * 0.15))
-    hard_dev, hard_tr = hard[:n_dev], hard[n_dev:]
+    frozen = os.getenv("V13_FROZEN_DEV")
+    if frozen:
+        # v14 R1b: dev = v13c 분할 동결(원 880 인덱스). 처치행(idx≥880)은 전량 학습.
+        fz = json.load(open(frozen, encoding="utf-8"))
+        # arm 파일 = 원 880(v13_hardset 순서) + 처치행. 원 880을 v13c와 동일하게
+        # 셔플(RNG 소비·스트림 순서 재현) → 앞 132 = 동결 dev, 잔여 748 + 처치행 = 학습.
+        base880, extra = hard[:880], hard[880:]
+        random.shuffle(base880)
+        n_dev = len(fz["rows"])
+        assert base880[:n_dev] == fz["rows"], "동결 dev 불일치(v13c 셔플 재현 실패)"
+        hard_dev = base880[:n_dev]
+        hard_tr = base880[n_dev:] + extra
+        print(f"frozen dev {n_dev} (v13c 분할·순서), train {len(hard_tr)} "
+              f"(원 748 + 처치 {len(extra)})")
+    else:
+        random.shuffle(hard)
+        n_dev = max(1, int(len(hard) * 0.15))
+        hard_dev, hard_tr = hard[:n_dev], hard[n_dev:]
     json.dump(hard_dev, open(os.path.join(os.path.dirname(HARD_PATH), "v13_hard_dev.json"), "w"),
               ensure_ascii=False)
 
