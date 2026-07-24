@@ -1,4 +1,18 @@
 {
+  "profiles": {
+    "_doc": "관계 인코더 프로파일 — env ONTOKIT_RELATION_ENCODER_MODEL 에 경로 지정으로 선택. default=속도(빌드 예산 준수), quality-large=정밀도(빌드 ~2.2배, 소규모·정밀도 우선 빌드용). fetch_model.py --profile <이름>.",
+    "default": "relation_encoder_ko",
+    "quality-large": {
+      "version": "re-ko-large-v1",
+      "description": "klue/roberta-large 337M + v13c 레시피(LR 2e-5, 스케일링 라운드 0724, 주심 72). KLUE holdout 0.6724(fp32)/0.6726(fp16 배포본, 무손실) = v13c +5.6pt, P/R .672/.673 동시개선, per:colleagues 0.576(역대 최고). 신선 홀드아웃 블라인드 정밀도 70.6%(v13c 44.7%, CI 비겹침). ⚠️빌드 소요 ~2.2배(뉴스 코퍼스 실측 +121%) — 기본 발효는 비용 상한(+30%) 위반으로 기각(C3), 소규모·정밀도 우선 빌드에 opt-in. 근거: eval_runs/relations/scaling_round_dossier.md",
+      "release_tag": "re-ko-large-v1",
+      "asset": "model_re_large_fp16.tar.gz",
+      "asset_sha256": "8f73dbb03e2c7d9b14c35b89f866aae6b9db7a08b175b59b9a36b70eac99ba7e",
+      "safetensors_sha256": "5a770f636b5dd592f64ba6c39a0812cd7ef0b581072d86d24847ca27aa59618f",
+      "extract_dir": "model_re_scale_large_fp16",
+      "env": "ONTOKIT_RELATION_ENCODER_MODEL"
+    }
+  },
   "relation_encoder_ko": {
     "version": "re-ko-hard-v13c",
     "description": "v12 레시피 + 채점확정 하드셋 748행 x1 혼합(인간검수 30건 대조·원장검사). KLUE 0.6169(-1.05pt, 게이트1 문언 FAIL — 패널 3요건 면제), 신선 홀드아웃 정밀도 51.8%(v12 43.1%, +8.7pt), wiki2 26.7%(+5.0pt, 보존 88.6%), 재빌드 열거 178·미타입 16→8·판례 6/8. 패널 조건부 발효 78/100 (2026-07-21, v13_panel_verdict.md). 알려진 회귀: per:colleagues F1 0.418→0.230 = v14 수리부채. 릴리스 re-ko-hard-v13c.",
