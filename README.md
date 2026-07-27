@@ -179,6 +179,13 @@ export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re_scale_large_fp16
 `eval_runs/relations/scaling_round_dossier.md`). 정밀도 70.6% 가 필요한 국소 빌드·재빌드·
 고품질 도메인 온톨로지에 quality-large 를 선택한다. fp16 은 fp32 와 방출 동일(무손실) 실측.
 
+**e2e 실빌드 실증(2026-07-26, 로컬 docker)** — 오프라인 벤치마크뿐 아니라 실제 파이프라인
+빌드에서도 large 우위 확인. 동일 서술형 코퍼스(mixed20k 표본 2000청크)를 인코더만 바꿔 빌드:
+관계 종류 24→30(+6종: org_members/org_dissolved/per_place_of_residence 등), 관계 인스턴스
+5172→5557(+7.4%), **small 은 large 의 완전 부분집합**(small 전용 0종). 클래스·계층·개체는
+동일(인코더 무관) → 차이가 순수 인코더 성능임을 통제 실증. large CPU 추론 ~9초/청크(GPU 서빙
+시 해소). 상세: xgen-levelup `docs/ontokit/ontokit_small_vs_large_정량비교_mixed2k_2026_07_26.md`.
+
 **v14 라운드 결과(2026-07-22, 기각)** — colleagues 회복 시도(업웨이트+방문/회동
 하드네거 4-arm)는 colleagues F1 0.22→0.51 회복에도 **기각**됐다. 교란 제거
 측정(동결 dev·base 재현 Δ0.0001)에서 무관계 인명쌍(PER-PER no_relation) 리콜이
