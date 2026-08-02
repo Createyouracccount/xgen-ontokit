@@ -115,7 +115,15 @@ def _evidence_ok(label: str, concept: str, texts: list[str], mode: str) -> bool:
         return any(lb_long.search(t) and any(p.search(t) for p in cue_pats)
                    for t in texts)
     if mode == "doc":
-        return any((label in t and concept in t) for t in texts)
+        # adj/adjdoc 과 동일한 한글 경계 매칭 적용('무역수지'의 '수지', '가수왕'의
+        # '가수' 관통 차단) — B1/B7 심판 수리가 doc 분기에만 누락돼 있던 것 정정.
+        # doc 의 '약한 증거' 성격은 유지: 인접 창(ADJ_WINDOW) 없이 동일 청크 공기만 요구.
+        lb_doc = re.compile(r"(?<![가-힣])" + re.escape(label)
+                            + r"(?=[은는이가을를도의와과에로서랑이나든]|[^가-힣]|$)")
+        cue_pats = [re.compile(r"(?<![가-힣])" + re.escape(c))
+                    for c in EVIDENCE_CUES.get(concept, [concept])]
+        return any(lb_doc.search(t) and any(p.search(t) for p in cue_pats)
+                   for t in texts)
     # 라벨 좌경계: 한글 접두 결합('무역수지'의 '수지') 관통 방지 — B1 심판 D1.
     # 우경계: 조사 폐집합/비한글/끝만 인정('음원 이용료'의 '이용' 관통 차단,
     # '가수 이용은'의 조사 결합은 통과) — B7 심판 D3 잠복 적발 선제 차단.

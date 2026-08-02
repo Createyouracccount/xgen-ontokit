@@ -26,9 +26,16 @@ def class_instances_triple(*, transitive: bool = True) -> str:
 # 결측 시 knorm으로 대체해 키워드 exact-match 청크가 묻히지 않게 함.
 def blend_score(vscore, knorm: float, vmin: float, vrng: float,
                 *, w_vec: float = 0.7, w_key: float = 0.3) -> float:
-    """근거블록 재랭킹 블렌드 점수. vscore 결측 시 knorm으로 floor."""
-    if isinstance(vscore, (int, float)):
-        vnorm = (vscore - vmin) / vrng if vrng else 0.0
+    """근거블록 재랭킹 블렌드 점수. vscore 결측 시 knorm으로 floor.
+
+    `bool` 은 수치로 보지 않는다(파이썬 `bool ⊂ int` — 상류 sentinel True/False 가
+    vscore 1.0/0.0 으로 둔갑해 날조 점수가 되는 것 차단). 결측과 동일 취급.
+    `vrng == 0`(후보 vscore 전원 동일 — 단일 청크·상수 반환 백엔드)도 정규화가
+    불가능하므로 결측과 동일하게 floor 를 적용한다. 그러지 않으면 vscore 를 **가진**
+    청크가 0 을 받아, 없는 청크(=knorm)보다 아래로 가라앉는 역전이 발생한다.
+    """
+    if isinstance(vscore, (int, float)) and not isinstance(vscore, bool) and vrng:
+        vnorm = (vscore - vmin) / vrng
     else:
-        vnorm = knorm   # floor guard: 결측 → keyword norm
+        vnorm = knorm   # floor guard: 결측·비수치·정규화 불가 → keyword norm
     return w_vec * vnorm + w_key * knorm

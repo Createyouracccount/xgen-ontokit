@@ -210,11 +210,16 @@ class ClassPromotionFilter:
         return PromotionDecision(True, "")
 
     def partition(self, items: Iterable[Mapping]) -> tuple[list, list]:
-        """items: {name, df, has_rel, has_kid, has_inst} → (승격, 탈락 [(item, reason)])."""
+        """items: {name, df, has_rel, has_kid, has_inst, person_dom} → (승격, 탈락 [(item, reason)]).
+
+        `person_dom`(R15 인명 게이트)은 `decide()` 와 동일 규약 — **자식 클래스 ≥2 구제를
+        넷팅한 뒤** True 를 넘길 것. 미지정 시 False(게이트 미발화, 기존 동작).
+        """
         kept, dropped = [], []
         for it in items:
             d = self.decide(it["name"], df=int(it.get("df", 1)),
                             has_rel=bool(it.get("has_rel")), has_kid=bool(it.get("has_kid")),
-                            has_inst=bool(it.get("has_inst")))
+                            has_inst=bool(it.get("has_inst")),
+                            person_dom=bool(it.get("person_dom")))
             (kept.append(it) if d.keep else dropped.append((it, d.reason)))
         return kept, dropped
