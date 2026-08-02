@@ -33,3 +33,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ontokit"]
+
+# src 레이아웃 — 미설치 상태(clean clone)에서도 `pytest tests/` 가 수집되게 한다.
+# 없으면 `ModuleNotFoundError: ontokit` 로 수집 단계에서 실패한다(`pip install -e .` 한
+# 환경에서만 통과해 결함이 가려짐).
+[tool.pytest.ini_options]
+pythonpath = ["src"]

@@ -25,5 +25,8 @@ eval/relation/model_re_aug_v11/
 eval/relation/model_re_aug_v12/
 eval/relation/model_re_scale_*/
 eval/relation/model_re_v13*/
+eval/relation/model_re_v14*/
+eval/relation/model_re_v15*/
 eval/relation/*.tar.gz
 eval/relation/model_re_scale_large_onnx*/
+eval/relation/v1[45]_*.log

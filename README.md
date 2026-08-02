@@ -66,6 +66,21 @@ concepts, entities, relations, data = await ext.extract(documents)
 | 보조 NER union | off | `ONTOKIT_NER_AUX_MODEL` | transformers(로컬) |
 | 사전 동의어 병합 | off | `ONTOKIT_SYNONYM_DICT` | 없음(TSV) |
 
+#### 튜닝 노브 (채널 on/off 가 아닌 임계값·동작 조정)
+
+위 표가 채널 스위치라면, 아래는 **이미 켜진 채널의 동작을 조정**하는 env 다. 전부 기본값이
+채택 근거를 가지므로, 바꾸기 전에 해당 라운드 기록을 확인할 것.
+
+| env | 기본 | 효과 |
+|---|---|---|
+| `ONTOKIT_RELATION_CONF_MIN` | `0.5` | 관계 인코더 conf 하한. 0722 스윕에서 0.65+ 는 `per:colleagues` 전멸로 기각 — 0.5 유지가 채택값. 우선순위: 명시 인자 > env > 기본 |
+| `ONTOKIT_NER_MIN_SCORE` | `0.40` | KoELECTRA NER 스팬 점수 하한(도메인별 재보정용) |
+| `ONTOKIT_NER_MIN_SCORE_EN` | `0`(off) | 영어 NER 점수 하한. ko 와 분리 — en 표본 히스토그램 확보 전까지 미적용 |
+| `ONTOKIT_NER_TWO_PASS` | `0`(off) | `max_len` 초과 텍스트를 2패스로 재처리 |
+| `ONTOKIT_NER_SPAN_GATE` | `0`(off) | 어절 경계 스팬 게이트(sg1). **기각·파킹** — 오살 24% 로 게이트 이득 초과, 재도전은 판별 기제부터 |
+| `ONTOKIT_NER_EMIT_MISC` | `0`(off) | 영어 NER 의 MISC 라벨 방출(구동작 복원용) |
+| `ONTOKIT_NN_JOIN` | `0`(off) | 관계 추출 시 공백 경계 명사 결합 보존(P0-2). ⚠️ XPN/SN 분기에는 미적용 — 어절 형태에 따라 결합이 끊긴다 |
+
 **불변식**: 기본 경로는 **LLM 호출 0회 · transformers 로드 0회**. 모델을 쓰는 채널은
 전부 env opt-in 이고, 기본 on 인 신규 채널(직업 타이핑)도 패키지 동봉 어휘집만 읽는다
 (네트워크 0). 유일한 LLM 경로는 `relation_hybrid.HybridRelationExtractor` 로,
