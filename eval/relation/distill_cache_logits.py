@@ -61,6 +61,24 @@ def build_distill_rows():
 
     base = [r for r in train_all if r["guid"] not in tune_guids] + aug
 
+    # 경로2(레이블 없는 증류) 채택 쌍 주입 — env 미지정 시 빈 값(기존 동작 불변).
+    # distill_tag_pairs 산출(teacher argmax label(int) + subject/object_entity{word,type}).
+    extra_path = os.getenv("DISTILL_EXTRA_PATH", "")
+    if extra_path and os.path.exists(extra_path):
+        extra_cap = int(os.getenv("DISTILL_EXTRA_CAP") or "0")
+        extra = []
+        with open(extra_path, encoding="utf-8") as f:
+            for line in f:
+                r = json.loads(line)
+                extra.append({"sentence": r["sentence"],
+                              "subject_entity": r["subject_entity"],
+                              "object_entity": r["object_entity"],
+                              "label": r["label"]})   # 이미 정수(teacher argmax)
+                if extra_cap and len(extra) >= extra_cap:
+                    break
+        print(f"[build_distill_rows] 경로2 추가 {len(extra)}행 ({extra_path})", flush=True)
+        base = base + extra
+
     hard = [json.loads(l) for l in open(HARD_PATH, encoding="utf-8")]
     random.shuffle(hard)
     n_dev = max(1, int(len(hard) * 0.15))
