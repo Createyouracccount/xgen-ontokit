@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader, Dataset
 from train_encoder import BATCH, LR, MAX_LEN, SEED, SPECIALS, mark
 from distill_cache_logits import build_distill_rows
 
-MAX_EPOCHS = 4
+MAX_EPOCHS = int(os.getenv("DISTILL_EPOCHS") or "4")
 
 
 class KDDataset(Dataset):
@@ -136,7 +136,7 @@ def main():
             model.save_pretrained(OUT_DIR)
             tok.save_pretrained(OUT_DIR)
             print(f"[dev] saved (best ep{ep})", flush=True)
-        elif ep - best_ep >= 1:
+        elif ep - best_ep >= int(os.getenv("DISTILL_PATIENCE") or "1"):
             print(f"[dev] early stop at ep{ep} (best ep{best_ep})", flush=True)
             break
 
