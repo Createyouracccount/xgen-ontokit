@@ -386,8 +386,11 @@ class DeterministicKoreanExtractor:
                     self.relations.extract_corpus(rel_chunk_buf))
                 if rels:
                     all_relations.extend(rels)
+                # M4(0807): 리포트 방출 — 발화율 0(정상)과 무증상 폴백(예외)을 로그로 구분.
+                logger.info("[hybrid-topup] report=%s", _rep)
             except Exception:
-                pass  # hybrid 실패는 비치명 — 규칙 결과(있으면) 유지, 관계 없이 진행
+                logger.warning("[hybrid-topup] extract_corpus 실패 — 관계 없이 진행"
+                               "(비치명, 배선 검증은 이 라인 유무로 판정)", exc_info=True)
 
         # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관). 인덱스화+허브필터(O(N·L²)).
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업, 동종계층).

@@ -82,11 +82,17 @@ class BudgetGuard:
     _budget_chunks: Optional[int] = field(default=None, repr=False)
 
     def plan(self, total_chunks: int) -> None:
-        """전체 청크 수를 받아 비율 상한을 절대 청크 수로 확정(사전 계산)."""
+        """전체 청크 수를 받아 비율 상한을 절대 청크 수로 확정(사전 계산).
+
+        0807 수리: 파이프라인이 group 단위로 extract_corpus 를 여러 번 부르면
+        called 는 누적인데 상한은 마지막 그룹 크기 기준이라 1그룹 캡이 코퍼스
+        전체 캡이 됐다(실측: 539청크에서 36콜 동결). 누적 planned 기준으로 확장 —
+        단일 호출(코퍼스 1방) 동작은 불변."""
         if self.max_chunk_pct is None:
             self._budget_chunks = None
         else:
-            self._budget_chunks = int(total_chunks * self.max_chunk_pct)
+            self._planned_total = getattr(self, "_planned_total", 0) + total_chunks
+            self._budget_chunks = int(self._planned_total * self.max_chunk_pct)
 
     def can_call(self, est_input_chars: int,
                  est_output_chars: Optional[int] = None) -> bool:
@@ -187,6 +193,7 @@ class HybridRelationExtractor:
     def __init__(self, *, llm=None, budget: Optional[BudgetGuard] = None,
                  kiwi=None, rule_extractor: Optional[KoreanRelationExtractor] = None,
                  llm_system: str = DEFAULT_LLM_SYSTEM,
+                 llm_user_prefix: str = "조문:",  # 0808: 코퍼스별 프레이밍(기본=0713 법령 호환)
                  topup_when: str = "empty", sparse_chars_per_rel: int = 400,
                  usage_extractor: Optional[Callable[[object], Optional[dict]]] = None):
         """topup_when: 어떤 청크를 LLM top-up 후보로 올릴지.
@@ -202,6 +209,7 @@ class HybridRelationExtractor:
         self.llm = llm
         self.budget = budget or BudgetGuard()
         self.llm_system = llm_system
+        self.llm_user_prefix = llm_user_prefix
         self.topup_when = topup_when
         self.sparse_chars_per_rel = sparse_chars_per_rel
         # 주입 LLM 이 usage(토큰수)를 별 경로로 노출할 때 뽑는 콜백(선택).
@@ -283,7 +291,7 @@ class HybridRelationExtractor:
         return all_rels, report.as_dict()
 
     async def _llm_call(self, text: str) -> tuple[list[dict], Optional[dict]]:
-        prompt = f"조문:\n{text[:6000]}"
+        prompt = f"{self.llm_user_prefix}\n{text[:6000]}"
         # 출력 물리 상한 — max_usd 를 하드 상한으로 만드는 핵심(BudgetGuard docstring).
         # can_call 은 출력을 max_output_chars 로 가정하는데, 실제 출력이 이를 넘으면
         # 마지막 1호출이 상한을 넘는다. LLM max_tokens 를 이 가정과 맞춰 물리 제한하면
