@@ -256,8 +256,12 @@ class DeterministicKoreanExtractor:
 
         for doc_name, chunks in documents.items():
             for ch in chunks:
+                if not isinstance(ch, dict):
+                    raise TypeError(
+                        f"청크는 dict 여야 합니다({doc_name!r}에서 {type(ch).__name__} 수신). "
+                        "입력 계약: {\"파일명\": [{\"chunk_id\", \"chunk_text\", \"chunk_index\"}]}")
                 cid = ch.get("chunk_id")
-                text = ch.get("chunk_text", "")
+                text = ch.get("chunk_text") or ""  # None 방어 — 빈 청크와 동일 취급
                 if not text.strip():
                     continue
                 n_chunks += 1
