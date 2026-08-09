@@ -7,8 +7,11 @@
 
 **무엇을 하나** — 문서 청크를 넣으면 개념(클래스), `subClassOf` 계층, 엔티티,
 관계 트리플을 방출한다. **스키마·계층·타이핑은 형태소 분석(Kiwi)·규칙·통계로만
-결정적으로 뽑는다(LLM 0회·모델 0회)** — 이것이 이 라이브러리의 본체이며 실측으로
-검증된 부분이다. **관계는 교체 가능한 provider 계층**이다: 조사 SVO 규칙(폴백),
+결정적으로 뽑는다(LLM 0회·모델 0회)** — 이것이 이 라이브러리의 본체다.
+축별 근거 수준은 같지 않다: **클래스 추출·provenance 는 실측 검증**됐고, **계층은
+(i) 접미공유 규칙(동종계층, X기관⊂기관 형 — 형태 규칙 수준) (ii) 직업 P106
+(직업클래스⊂인물, 전수 채점 검증) (iii) 정의문 채널(백과체 검증·뉴스체 실측 거짓률
+88.5%로 기본 off, v0.14~)** 의 3계보로 각각 다르다. **관계는 교체 가능한 provider 계층**이다: 조사 SVO 규칙(폴백),
 로컬 KLUE-RE 인코더(opt-in), 예산 통제된 LLM top-up(opt-in) 중 선택하거나
 `Extractor` Protocol 로 직접 주입한다.
 
@@ -42,15 +45,15 @@ concepts, entities, relations, data = await ext.extract(documents)
 ```
 (엔티티까지 뽑으려면 NER 주입이 필요하다 — [설치](#설치)·[기본값 표](#기본값--env-스위치-한눈에) 참조)
 
-## 언어 지원 매트릭스 (v0.13.1, 정직하게)
+## 언어 지원 매트릭스 (v0.14.0, 정직하게)
 
 | 축 | 한국어 | 영어 | 혼합 청크 |
 |---|---|---|---|
 | 클래스(복합명사) | ✅ Kiwi | ✅ nltk POS (extras[english], **auto-wire**) | ✅ 이중 추출(소수언어 용어 보존) |
-| 계층(subClassOf) | ✅ 문자 접미공유 + **정의문(Hearst, 기본 on)** | ✅ 단어 접미공유(대소문자 무시) | ✅ |
+| 계층(subClassOf) | ✅ 문자 접미공유 + 정의문(Hearst, **기본 off** v0.14~) | ✅ 단어 접미공유(대소문자 무시) | ✅ |
 | 엔티티(NER) | ✅ KoELECTRA(주입) | ✅ dslim BERT MIT(주입 또는 `ONTOKIT_NER_EN=auto`) | ⚠️ 지배언어만(비용) |
 | **관계** | ✅ 조사 SVO(규칙) + KLUE-RE 인코더(opt-in) | ✅ **spaCy 의존 SVO(opt-in, v0.13)** | 한국어만 |
-| 인스턴스 타이핑 | ✅ 정의문 + **직업 P106 어휘집(기본 on)** | ❌ 미지원 | 한국어만 |
+| 인스턴스 타이핑 | ✅ 정의문(opt-in) + **직업 P106 어휘집(기본 on)** | ❌ 미지원 | 한국어만 |
 | OWL 라벨 | `@ko` | `@en` (자동판정) | 혼재 출력 |
 
 ⚠️ 품질 검증 범위: 한국어=finreg 489 실측, 영어=구조 테스트만(코퍼스 실측 미완).
@@ -60,8 +63,10 @@ concepts, entities, relations, data = await ext.extract(documents)
 ⚠️ v0.5 대비 동작 변화: `auto_english=True` 기본이라 **라틴 약어가 섞인 한국어 코퍼스에
 영어 클래스가 새로 추가**된다(순수 한글 코퍼스는 출력 완전 동일 — finreg 489 실측).
 기존 동작 유지가 필요하면 `auto_english=False`.
-⚠️ v0.11 대비 동작 변화: `enable_hearst=True`(정의문 이질계층), `enable_occupation=True`
-(직업 타이핑)가 **기본 on** — 순수 접미공유 출력과 다르다. 되돌리려면 각각 `False`.
+⚠️ v0.14 동작 변화: `enable_hearst` **기본 off** — 뉴스체 실그래프 실측에서 정의문
+채널 유래 의미 subClassOf 의 거짓률 88.5%(비정의문 서술문의 구조적 오발화). 백과·사전형
+코퍼스는 `enable_hearst=True` opt-in(백과체 외부 gold 89/100 검증). v0.12~v0.13 은
+기본 on 이었다. `enable_occupation=True`(직업 타이핑)는 기본 on 유지.
 
 ### 기본값 / env 스위치 한눈에
 
@@ -71,7 +76,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 |---|---|---|---|
 | 한국어 클래스·접미공유 계층 | **on** | — | 없음(Kiwi) |
 | 영어 클래스 | **on**(nltk 설치 시) | `auto_english=False` | 없음(nltk POS) |
-| 정의문 계층·타이핑(Hearst) | **on** | `enable_hearst=False` | 없음(규칙) |
+| 정의문 계층·타이핑(Hearst) | **off**(v0.14~) | `enable_hearst=True` | 없음(규칙) |
 | 직업 타이핑(P106) | **on** | `enable_occupation=False` / `ONTOKIT_OCCUPATION_TYPING=off` | 없음(동봉 어휘집) |
 | 한국어 관계(조사 SVO) | **on** | `enable_relations=False` | 없음(Kiwi) |
 | 관계 인코더(KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers(로컬) |
@@ -242,13 +247,19 @@ dev 가 하드셋 길이 종속이라 동결 없이는 best-epoch 교란으로 �
   `train_encoder.py`(재학습)·`eval_encoder.py`(채점)·`JUDGE_PROTOCOL.md`(판정 기준).
   가중치는 GitHub Release 자산으로 배포(git 미커밋, sha256 은 `MODEL_LOCK.json`).
 
-## 정의문 계층·타이핑 (v0.12~) — 이질계층 유도 (기본 on)
+## 정의문 계층·타이핑 (v0.12~) — 이질계층 유도 (**기본 off, v0.14~**)
 접미공유가 **원리적으로 불가능한** 이질계층(강아지⊂동물, 신용공여⊂거래)을 정의문
-종결패턴(계사/genus/서술/속하는)으로 유도한다. `enable_hearst=True` 가 기본.
+종결패턴(계사/genus/서술/속하는)으로 유도한다. **v0.14 부터 기본 off** — 뉴스체
+실그래프(ui_news100 538청크) 실측에서 이 채널 유래 의미 subClassOf 의 거짓률이
+**88.5%**(참7/거짓54, Wilson 하한 0.782)로, 정의문이 아닌 서술문("증권사는 …
+규제다" 류)의 구조적 오발화가 원인이다. 백과·사전형 코퍼스(위키·법령 정의조항)는
+opt-in 권장 — 그 문체에서는 외부 gold 검증 실적이 있다(아래 근거 수준).
 
 ```python
-ext = DeterministicKoreanExtractor(enable_hearst=True)   # 기본값
+ext = DeterministicKoreanExtractor(enable_hearst=True)   # 백과체 opt-in (기본 off)
 ```
+- 채널 상태는 빌드 로그로 판별 가능: on 이면 `정의문 계층(hearst) 채널 on: 정의쌍 N건
+  수집` 라인이 **무조건** 남는다(off 면 라인 부재).
 - **ABox↔TBox 브리지**: 정의문 주어가 NER 엔티티면 `subClassOf` 대신 `rdf:type` 으로
   방출 — 계층 도달률 0% 였던 고립 섬 문제를 수복.
 - 전부 규칙(Kiwi 형태소 + 종결패턴). LLM 0콜.
@@ -296,7 +307,7 @@ src/ontokit/
 │                         #   relation_ko(조사 SVO) / relation_encoder_ko(KLUE-RE, opt-in)
 │                         #   relation_en(spaCy 의존 SVO, opt-in) / relation_hybrid(⚠️LLM, 주입 전용)
 ├── morphology/           # kiwi_nouns(한국어) + en_nouns(영어 nltk POS)
-├── hierarchy/            # suffix_share(접미공유·주엔진, ko=문자/en=단어), hearst_ko(정의문, 기본 on)
+├── hierarchy/            # suffix_share(접미공유·주엔진, ko=문자/en=단어), hearst_ko(정의문, 기본 off v0.14~)
 ├── instance_typing/      # occupation(P106 어휘집·기본 on) + evidence + hygiene (v0.13)
 ├── ner/                  # koelectra(ko) + english(dslim BERT MIT) + ensemble·span_align
 ├── dedup/                # deterministic(형태소) + synonym_dict(우리말샘, opt-in)
@@ -332,6 +343,11 @@ python eval_encoder.py holdout
 - **계층 89/100 과 정의문 615건·정밀도 87%** 는 개발 라운드의 **자체 심판·커밋 기록**이다.
   `eval/hierarchy/README.md` 의 결과 로그에는 R0 26/100 과 "R1 진행 중"만 남아 있고,
   89/100 을 뒷받침하는 재현 산출물은 **아직 랜딩되지 않았다**. 이 수치는 그 전제에서 읽을 것.
+- **정의문 계층의 문체 의존성(2026-08 실측)**: 위 검증은 전부 **백과·사전체**다. 뉴스체
+  실그래프(ui_news100)에서는 의미 유래 subClassOf 의 **88.5%가 거짓**(66건 전수 감정,
+  참7/거짓54/판단불가5)으로 실측돼 v0.14 부터 기본 off 로 전환했다. 접미공유 유래
+  계층(전체의 75%)은 X기관⊂기관 형 동종계층으로 형태 규칙 수준이며 의미 검증 대상이
+  아니다 — "계층이 검증됨"으로 읽지 말 것.
 - **"NN/100 심판" 점수는 전부 자체 심판 루프**의 결과다(프로토콜은
   `eval/*/JUDGE_PROTOCOL.md`). 외부 재채점이 아니다. 외부 gold 에 직접 앵커된 수치는
   관계 holdout(0.6274)과 ER(0.776) 둘뿐이다.

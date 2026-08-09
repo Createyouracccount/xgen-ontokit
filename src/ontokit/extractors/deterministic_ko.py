@@ -34,7 +34,7 @@ class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
                  en_nouns=None, en_ner=None, relation_extractor=None,
                  enable_relations: bool = True, auto_english: bool = True,
-                 enable_hearst: bool = True, enable_occupation: bool = True):
+                 enable_hearst: bool = False, enable_occupation: bool = True):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
         domain_words: 사용자사전 도메인 용어(한국어 Kiwi 사용자사전 + 영어 단일명사 허용목록).
@@ -42,12 +42,15 @@ class DeterministicKoreanExtractor:
         en_ner: EnglishNER(None이면 영어 엔티티 추출 생략, extras[ner]).
         auto_english: True(기본)면 nltk 설치 시 en_nouns 자동 생성 — 영어 클래스가
           별도 주입 없이 나온다. en_ner 는 torch 모델 로드가 무거워 자동화하지 않음(명시 주입만).
-        enable_hearst: True(기본, v0.12~)면 정의문 계층(hearst_ko) 배선 — 접미공유가
-          원리적 불가한 이질계층(강아지⊂동물, 신용공여⊂거래)을 종결 패턴(계사/genus/서술/
-          속하는)으로 유도. 외부 gold(Wikidata P279) 심판루프 89/100 검증. 비정의문
-          문장엔 발화 안 함(오탐 낮음, 법령체 스팟체크 0). ⚠️v0.11 대비 동작 변화:
-          정의문("X는…Y이다")이 있는 한국어 코퍼스에 이질계층 subClassOf 가 추가된다
-          (순수 접미공유 출력과 다름). 기존 동작이 필요하면 enable_hearst=False.
+        enable_hearst: **False(기본, v0.14~ 전환)** — 정의문 계층(hearst_ko) 배선.
+          접미공유가 원리적 불가한 이질계층(강아지⊂동물, 신용공여⊂거래)을 종결
+          패턴(계사/genus/서술/속하는)으로 유도. 백과·사전체 외부 gold(Wikidata
+          P279) 심판루프 89/100 검증 — **백과체 코퍼스에서만 opt-in 권장**.
+          ⚠️기본 off 전환 사유(2026-08-10 P0-1 처분·심판 조건부 인용): 뉴스체
+          실그래프(ui_news100) 실측에서 이 채널 유래 의미 subClassOf의 거짓률
+          **88.5%**(참7/거짓54, Wilson 하한 0.782) — 정의문이 아닌 서술문("X는…
+          Y이다")의 구조적 오발화. 근거: eval_runs/bench/hier_channel_off_*.{md,json}.
+          v0.12~v0.13 은 기본 on 이었다.
 
         혼합 코퍼스(한국어+영어): 명사(클래스)는 한·영 추출기를 **둘 다** 실행해
         혼합 청크의 소수언어 용어("Basel III 규제"의 Basel)를 보존한다(v0.6, 자연 직교 —
@@ -324,6 +327,11 @@ class DeterministicKoreanExtractor:
                         # child 는 NER 개체일 수 있어(개체-as-클래스 오염) 유예.
                         class_chunks.setdefault(hp["parent"], set()).update(sc)
 
+        # 정의문 계층 채널 발화 로그 — 무조건(쌍 0건이어도 on이면 라인 존재).
+        # off=라인 부재 / on=라인 존재로 채널 상태가 로그만으로 판별돼야 한다.
+        if self.enable_hearst:
+            logger.info("정의문 계층(hearst) 채널 on: 정의쌍 %d건 수집", len(hearst_pairs))
+
         # ② NER → 인스턴스 엔티티 — 언어별 배치 forward 1회.
         self._run_ner_batched(self.ner, ko_ner_buf, all_entities, kiwi=self.nouns.kiwi)
         self._run_ner_batched(self.en_ner, en_ner_buf, all_entities)  # 영어는 정렬 비적용
@@ -399,7 +407,8 @@ class DeterministicKoreanExtractor:
         # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관). 인덱스화+허브필터(O(N·L²)).
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업, 동종계층).
         #   접미공유(동종)와 정의문(이질, hearst_ko 종결패턴)은 상보 — merge 시 superset.
-        #   정의문 계층은 enable_hearst(기본 on, v0.12~, 외부gold 심판루프 89/100 검증).
+        #   정의문 계층은 enable_hearst(기본 off, v0.14~ — 뉴스체 거짓률 88.5% 실측.
+        #   백과체 opt-in, 외부gold 심판루프 89/100 검증).
         #   ⚠️클래스 승격 게이트(④')보다 먼저 — 계층 참여가 게이트의 보존 조건이므로
         #   전체 클래스 후보 위에서 유도해야 df=1 자식(안성농업전문학교 류)이 살아남는다.
         all_hier = list(existing.get("class_hierarchy", [])) if existing else []

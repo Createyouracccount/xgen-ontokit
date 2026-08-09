@@ -176,7 +176,9 @@ def test_definitional_instance_typing():
             return [{"entity": s, "class": "기관", "type": "INSTANCE",
                      "source_chunks": source_chunks}
                     for s in ("서울고등학교", "부산고등학교") if s in text]
-    ext = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False)
+    # 정의문 채널 자체를 시험하므로 opt-in 명시 (v0.14 기본 off — 뉴스체 거짓률 실측)
+    ext = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False,
+                                       enable_hearst=True)
     docs = {"d": [
         {"chunk_id": "c1", "chunk_text": "서울고등학교\n서울고등학교는 서울에 있는 공립고등학교이다."},
         {"chunk_id": "c2", "chunk_text": "부산고등학교\n부산고등학교는 부산에 있는 공립고등학교이다."},
