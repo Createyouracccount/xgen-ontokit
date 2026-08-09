@@ -300,6 +300,13 @@ python eval_encoder.py holdout
   hierarchy (75% of all edges) is same-kind hierarchy of the form X기관⊂기관 — a
   morphological rule, not semantically validated. Do not read this as "the hierarchy is
   verified".
+- **Hierarchy sparsity under v0.14 defaults (e2e measured 2026-08-10, news register)**:
+  a full build of ui_news100 (538 news chunks) with default settings yields **43
+  `subClassOf` edges** and **58/3,381 (1.7%) hierarchy-participating classes** — 98.3%
+  of classes are isolated. No false hierarchy, but very little hierarchy. This is a
+  news-register measurement and register-dependent (finreg 489, legal register, yields
+  1,710 suffix-share edges). Judge the channel by these numbers if you need hierarchy
+  on news-like corpora.
 - **Hierarchy 89/100 and definitional 615 pairs·87% precision** are **self-judged
   development-round records**. The result log in `eval/hierarchy/README.md` only contains
   R0 26/100 and "R1 in progress"; the artifacts backing 89/100 have **not landed yet**.
