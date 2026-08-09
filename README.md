@@ -361,7 +361,7 @@ python eval_encoder.py holdout
 public 리포라 **인증 없이** 설치된다:
 
 ```bash
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.13.1"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.14.0"
 ```
 버전 고정을 권장한다(기본 on 채널이 마이너 버전에서 바뀐 이력이 있다 — 위 동작 변화 주의 참조).
 `pyproject.toml` dependencies 또는 requirements 에 위 URL 을 추가하면 된다.

@@ -33,15 +33,15 @@ concepts, entities, relations, data = await ext.extract(documents)
 (Entity extraction requires injecting a NER — see [Install](#install) and the
 [defaults table](#defaults--env-switches-at-a-glance).)
 
-## Language support matrix (v0.13.1, stated honestly)
+## Language support matrix (v0.14.0, stated honestly)
 
 | Axis | Korean | English | Mixed chunks |
 |---|---|---|---|
 | Class (compound nouns) | ✅ Kiwi | ✅ nltk POS (extras[english], **auto-wire**) | ✅ dual extraction (minority-language terms preserved) |
-| Hierarchy (subClassOf) | ✅ character suffix-share + **definitional (Hearst, on by default)** | ✅ word suffix-share (case-insensitive) | ✅ |
+| Hierarchy (subClassOf) | ✅ character suffix-share + definitional (Hearst, **off by default** v0.14~) | ✅ word suffix-share (case-insensitive) | ✅ |
 | Entity (NER) | ✅ KoELECTRA (injected) | ✅ dslim BERT MIT (injected or `ONTOKIT_NER_EN=auto`) | ⚠️ dominant language only (cost) |
 | **Relation** | ✅ particle SVO (rules) + KLUE-RE encoder (opt-in) | ✅ **spaCy dependency SVO (opt-in, v0.13)** | Korean only |
-| Instance typing | ✅ definitional + **occupation P106 lexicon (on by default)** | ❌ unsupported | Korean only |
+| Instance typing | ✅ definitional (opt-in) + **occupation P106 lexicon (on by default)** | ❌ unsupported | Korean only |
 | OWL labels | `@ko` | `@en` (auto-detected) | mixed output |
 
 ⚠️ Quality-verification scope: Korean = measured on finreg 489, English = structural
@@ -53,9 +53,11 @@ to rules — see [Relation encoder](#relation-encoder-v013--klue-re--sredfm-ko-a
 ⚠️ Behavior change vs v0.5: `auto_english=True` is the default, so **English classes are
 newly added to Korean corpora containing Latin acronyms** (pure-Hangul corpora produce
 identical output — measured on finreg 489). Set `auto_english=False` to keep prior behavior.
-⚠️ Behavior change vs v0.11: `enable_hearst=True` (definitional heterogeneous hierarchy) and
-`enable_occupation=True` (occupation typing) are **on by default** — output differs from pure
-suffix-share. Set each to `False` to revert.
+⚠️ Behavior change in v0.14: `enable_hearst` is now **off by default** — on a real news-corpus
+graph, 88.5% of the semantic `subClassOf` edges this channel produced were false (structural
+misfires on non-definitional predicate sentences). Encyclopedic/dictionary-style corpora should
+opt in with `enable_hearst=True` (external-gold 89/100 record on that register). v0.12–v0.13
+had it on by default. `enable_occupation=True` (occupation typing) stays on by default.
 
 ### Defaults / env switches at a glance
 
@@ -65,7 +67,7 @@ What a no-arg `DeterministicKoreanExtractor()` turns on, vs what only env enable
 |---|---|---|---|
 | Korean classes·suffix-share hierarchy | **on** | — | no (Kiwi) |
 | English classes | **on** (if nltk installed) | `auto_english=False` | no (nltk POS) |
-| Definitional hierarchy·typing (Hearst) | **on** | `enable_hearst=False` | no (rules) |
+| Definitional hierarchy·typing (Hearst) | **off** (v0.14~) | `enable_hearst=True` | no (rules) |
 | Occupation typing (P106) | **on** | `enable_occupation=False` / `ONTOKIT_OCCUPATION_TYPING=off` | no (bundled lexicon) |
 | Korean relations (particle SVO) | **on** | `enable_relations=False` | no (Kiwi) |
 | Relation encoder (KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers (local) |
@@ -98,7 +100,7 @@ pip install "xgen-ontokit[all]"          # everything
 # ⚠️ english-relations needs the spaCy model fetched separately (not a PyPI package):
 #   python -m spacy download en_core_web_sm
 # Direct from GitHub:
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.13.1"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.14.0"
 ```
 
 ## Build — LLM-free Korean·English extraction
@@ -195,14 +197,20 @@ Fine-tuned klue/roberta-small, **zero LLM API calls** (local inference, same fam
   `JUDGE_PROTOCOL.md` (criteria). Weights ship as GitHub Release assets (not committed;
   sha256 in `MODEL_LOCK.json`).
 
-## Definitional hierarchy·typing (v0.12~) — heterogeneous hierarchy induction (on by default)
+## Definitional hierarchy·typing (v0.12~) — heterogeneous hierarchy induction (**off by default, v0.14~**)
 Induces the heterogeneous hierarchies that suffix-share is **structurally incapable** of
 catching (강아지 ⊂ 동물, 신용공여 ⊂ 거래) via definitional sentence-ending patterns
-(copula/genus/predicate/속하는). `enable_hearst=True` is the default.
+(copula/genus/predicate/속하는). **Off by default since v0.14** — measured on a real news
+corpus (ui_news100, 538 chunks), 88.5% of the semantic `subClassOf` edges from this channel
+were false (7 true / 54 false, Wilson lower bound 0.782), caused by structural misfires on
+non-definitional predicate sentences. Opt in for encyclopedic/dictionary corpora, where the
+external-gold record below applies.
 
 ```python
-ext = DeterministicKoreanExtractor(enable_hearst=True)   # default
+ext = DeterministicKoreanExtractor(enable_hearst=True)   # encyclopedic opt-in (default off)
 ```
+- Channel state is verifiable from build logs alone: when on, the line
+  `정의문 계층(hearst) 채널 on: 정의쌍 N건 수집` is **always** emitted (absent when off).
 - **ABox↔TBox bridge**: when a definitional subject is a NER entity, it emits `rdf:type`
   instead of `subClassOf` — repairing isolated islands that made hierarchy reachability 0%.
 - Entirely rule-based (Kiwi morphology + ending patterns). Zero LLM calls.
@@ -252,7 +260,7 @@ src/ontokit/
 │                         #   relation_ko (particle SVO) / relation_encoder_ko (KLUE-RE, opt-in)
 │                         #   relation_en (spaCy dep SVO, opt-in) / relation_hybrid (⚠️LLM, injection-only)
 ├── morphology/           # kiwi_nouns (Korean) + en_nouns (English nltk POS)
-├── hierarchy/            # suffix_share (main engine, ko=char/en=word), hearst_ko (definitional, on by default)
+├── hierarchy/            # suffix_share (main engine, ko=char/en=word), hearst_ko (definitional, off by default v0.14~)
 ├── instance_typing/      # occupation (P106 lexicon, on by default) + evidence + hygiene (v0.13)
 ├── ner/                  # koelectra (ko) + english (dslim BERT MIT) + ensemble·span_align
 ├── dedup/                # deterministic (morphology) + synonym_dict (Urimalsaem, opt-in)
@@ -285,6 +293,13 @@ python eval_encoder.py holdout
 
 ### ⚠️ Stated honestly — what is still weakly evidenced
 
+- **Register dependence of the definitional channel (measured 2026-08)**: all validation
+  above is on encyclopedic/dictionary text. On a real news-corpus graph (ui_news100),
+  **88.5% of its semantic `subClassOf` edges were false** (66 edges fully adjudicated:
+  7 true / 54 false / 5 undecidable) — hence the v0.14 default-off. Suffix-share-derived
+  hierarchy (75% of all edges) is same-kind hierarchy of the form X기관⊂기관 — a
+  morphological rule, not semantically validated. Do not read this as "the hierarchy is
+  verified".
 - **Hierarchy 89/100 and definitional 615 pairs·87% precision** are **self-judged
   development-round records**. The result log in `eval/hierarchy/README.md` only contains
   R0 26/100 and "R1 in progress"; the artifacts backing 89/100 have **not landed yet**.
@@ -301,7 +316,7 @@ python eval_encoder.py holdout
 The repo is public, so it installs **without authentication**:
 
 ```bash
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.13.1"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.14.0"
 ```
 Pinning is recommended — on-by-default channels have changed across minor versions (see the
 behavior-change notes above). Add the URL to your `pyproject.toml` dependencies or requirements.
