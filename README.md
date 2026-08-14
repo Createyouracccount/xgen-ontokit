@@ -67,6 +67,11 @@ concepts, entities, relations, data = await ext.extract(documents)
 채널 유래 의미 subClassOf 의 거짓률 88.5%(비정의문 서술문의 구조적 오발화). 백과·사전형
 코퍼스는 `enable_hearst=True` opt-in(백과체 외부 gold 89/100 검증). v0.12~v0.13 은
 기본 on 이었다. `enable_occupation=True`(직업 타이핑)는 기본 on 유지.
+⚠️ v0.15 동작 변화: `enable_qdt_gate` **기본 on** — 수량·날짜·시간(QT/DT/TI) 개체 중
+**관계에 참여하지 않는 것**의 인스턴스 승격을 차단한다. 근거: 개체 정밀도 파일럿
+(n=60, seed 20260810)에서 그래프 결함 38건 중 QT/DT/TI 유령("3분기"·"2023년" 류
+문서 앵커 없는 값 개체)이 17건, 차단 시 오살 0. 관계 목적어(설립일 등)로 참여하는
+개체는 보존된다. 구동작 복원: `enable_qdt_gate=False` 또는 `ONTOKIT_QDT_GATE=off`.
 
 ### 기본값 / env 스위치 한눈에
 
@@ -78,6 +83,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 | 영어 클래스 | **on**(nltk 설치 시) | `auto_english=False` | 없음(nltk POS) |
 | 정의문 계층·타이핑(Hearst) | **off**(v0.14~) | `enable_hearst=True` | 없음(규칙) |
 | 직업 타이핑(P106) | **on** | `enable_occupation=False` / `ONTOKIT_OCCUPATION_TYPING=off` | 없음(동봉 어휘집) |
+| QDT 유령 게이트 | **on**(v0.15~) | `enable_qdt_gate=False` / `ONTOKIT_QDT_GATE=off` | 없음(규칙) |
 | 한국어 관계(조사 SVO) | **on** | `enable_relations=False` | 없음(Kiwi) |
 | 관계 인코더(KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers(로컬) |
 | 영어 NER | off | `ONTOKIT_NER_EN=auto` | transformers(로컬) |

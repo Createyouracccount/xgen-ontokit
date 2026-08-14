@@ -58,6 +58,12 @@ graph, 88.5% of the semantic `subClassOf` edges this channel produced were false
 misfires on non-definitional predicate sentences). Encyclopedic/dictionary-style corpora should
 opt in with `enable_hearst=True` (external-gold 89/100 record on that register). v0.12–v0.13
 had it on by default. `enable_occupation=True` (occupation typing) stays on by default.
+⚠️ v0.15 behavior change: `enable_qdt_gate` **on by default** — blocks instance promotion
+of quantity/date/time (QT/DT/TI) entities that participate in **no relation**. Basis:
+entity-precision pilot (n=60, seed 20260810) — 17 of 38 graph defects were QT/DT/TI
+ghosts ("Q3", "year 2023"-style value entities with no document anchor); blocking kills
+zero legitimate entities. Entities serving as relation objects (founding dates etc.) are
+preserved. Restore old behavior: `enable_qdt_gate=False` or `ONTOKIT_QDT_GATE=off`.
 
 ### Defaults / env switches at a glance
 
@@ -69,6 +75,7 @@ What a no-arg `DeterministicKoreanExtractor()` turns on, vs what only env enable
 | English classes | **on** (if nltk installed) | `auto_english=False` | no (nltk POS) |
 | Definitional hierarchy·typing (Hearst) | **off** (v0.14~) | `enable_hearst=True` | no (rules) |
 | Occupation typing (P106) | **on** | `enable_occupation=False` / `ONTOKIT_OCCUPATION_TYPING=off` | no (bundled lexicon) |
+| QDT ghost gate | **on** (v0.15~) | `enable_qdt_gate=False` / `ONTOKIT_QDT_GATE=off` | no (rules) |
 | Korean relations (particle SVO) | **on** | `enable_relations=False` | no (Kiwi) |
 | Relation encoder (KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers (local) |
 | English NER | off | `ONTOKIT_NER_EN=auto` | transformers (local) |

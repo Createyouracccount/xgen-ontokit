@@ -29,12 +29,17 @@ _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")  # 라틴 2자+ 연속 (단독 기호�
 # TBox 절멸이 됨(심판 A-2) — 계층참여·NER동일명 조건만 적용.
 CLASS_DF_GATE_MIN_CHUNKS = 500
 
+# QDT 유령 게이트 대상 — koelectra TTA_LABEL_KO 의 QT/DT/TI 매핑 한글 클래스명.
+# "3분기"·"2023년"·"오후 2시" 류는 문서 앵커 없인 개체 정체성이 없다(유령).
+QDT_GHOST_CLASSES = frozenset({"수량", "날짜", "시간"})
+
 
 class DeterministicKoreanExtractor:
     def __init__(self, kiwi=None, ner=None, domain_words: Optional[list[str]] = None,
                  en_nouns=None, en_ner=None, relation_extractor=None,
                  enable_relations: bool = True, auto_english: bool = True,
-                 enable_hearst: bool = False, enable_occupation: bool = True):
+                 enable_hearst: bool = False, enable_occupation: bool = True,
+                 enable_qdt_gate: bool = True):
         """kiwi: Kiwi 인스턴스(없으면 생성, extras[korean]).
         ner: KoElectraNER 인스턴스(None이면 한국어 엔티티 추출 생략, extras[ner]).
         domain_words: 사용자사전 도메인 용어(한국어 Kiwi 사용자사전 + 영어 단일명사 허용목록).
@@ -51,6 +56,10 @@ class DeterministicKoreanExtractor:
           **88.5%**(참7/거짓54, Wilson 하한 0.782) — 정의문이 아닌 서술문("X는…
           Y이다")의 구조적 오발화. 근거: eval_runs/bench/hier_channel_off_*.{md,json}.
           v0.12~v0.13 은 기본 on 이었다.
+        enable_qdt_gate: **True(기본, v0.15~)** — 수량·날짜·시간(QT/DT/TI) 개체의
+          관계 미참여분 인스턴스 승격 차단. 개체 정밀도 파일럿(0810, n=60) 결함
+          38 중 QT/DT/TI 유령 17 커버·오살 0. 관계 참여 개체(설립일 목적어 등)는
+          보존. env ONTOKIT_QDT_GATE=off 로 비활성.
 
         혼합 코퍼스(한국어+영어): 명사(클래스)는 한·영 추출기를 **둘 다** 실행해
         혼합 청크의 소수언어 용어("Basel III 규제"의 Basel)를 보존한다(v0.6, 자연 직교 —
@@ -121,6 +130,14 @@ class DeterministicKoreanExtractor:
         self.enable_occupation = (enable_occupation
                                   and _os.getenv("ONTOKIT_OCCUPATION_TYPING", "").lower()
                                   not in ("off", "false", "0"))
+        # QDT 유령 게이트 (v0.15) — 수량·날짜·시간(QT/DT/TI) 개체는 관계 미참여 시
+        # 인스턴스 승격 차단. 근거: 개체 정밀도 파일럿(0810, n=60 seed 20260810)
+        # 결함 38 중 QT/DT/TI 유령 17 커버·오살 0. 관계 목적어(설립일 등 G1' 서명
+        # 허용류)로 참여하는 개체는 보존 — 관계 엣지(최희소 자원) 파괴 채널 봉쇄.
+        # env ONTOKIT_QDT_GATE=off 로 강제 비활성(A/B·긴급 차단용).
+        self.enable_qdt_gate = (enable_qdt_gate
+                                and _os.getenv("ONTOKIT_QDT_GATE", "").lower()
+                                not in ("off", "false", "0"))
         self._lock = threading.Lock()
 
     def _default_relation_extractor(self):
@@ -403,6 +420,27 @@ class DeterministicKoreanExtractor:
             except Exception:
                 logger.warning("[hybrid-topup] extract_corpus 실패 — 관계 없이 진행"
                                "(비치명, 배선 검증은 이 라인 유무로 판정)", exc_info=True)
+
+        # ③" QDT 유령 게이트 — 수량·날짜·시간 개체의 관계 미참여분 승격 차단.
+        #   반드시 관계 수집 완주 후(hybrid top-up 포함) — 참여 판정이 전체 관계
+        #   기준이어야 관계 목적어(날짜/수량, G1' 허용 서명)를 오살하지 않는다.
+        #   비교는 공백 정규화(관계 표면어 ↔ NER 개체명 표기 차 방어).
+        if self.enable_qdt_gate and all_entities:
+            _rel_norms = set()
+            for _t in all_relations:
+                _rel_norms.add(str(_t.get("subject", "")).replace(" ", ""))
+                _rel_norms.add(str(_t.get("object", "")).replace(" ", ""))
+            _rel_norms.discard("")
+            n_qdt_dropped = 0
+            for _doc, _ents in all_entities.items():
+                kept = [e for e in _ents
+                        if e.get("class") not in QDT_GHOST_CLASSES
+                        or e.get("entity", "").replace(" ", "") in _rel_norms]
+                n_qdt_dropped += len(_ents) - len(kept)
+                _ents[:] = kept
+            if n_qdt_dropped:
+                logger.info("QDT 유령 게이트: 관계 미참여 수량·날짜·시간 개체 %d건 차단",
+                            n_qdt_dropped)
 
         # ④ 계층: 전체 클래스에 접미공유 1회 (청크 경계 무관). 인덱스화+허브필터(O(N·L²)).
         #   한국어 head-final 특성으로 복합명사 접미가 상위 개념(생명보험업⊂보험업, 동종계층).

@@ -1702,3 +1702,53 @@ def test_occupation_evidence_cue_gate():
     # 우경계: '음원 이용료' 의 '이용' 관통 차단, 조사 결합은 통과
     assert not _evidence_ok("이용", "가수", ["음원 이용료 인상 논의"], "adj")
     assert _evidence_ok("이용", "가수", ["가수 이용은 신곡을 발표했다"], "adj")
+
+
+def test_qdt_ghost_gate(monkeypatch):
+    """QDT 유령 게이트(v0.15) — 관계 미참여 수량·날짜·시간 차단, 참여 보존, kill-switch."""
+    try:
+        from kiwipiepy import Kiwi  # noqa: F401
+    except ImportError:
+        import pytest; pytest.skip("kiwipiepy 미설치")
+    import asyncio
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+
+    class FakeNER:
+        def entities(self, text, *, source_chunks):
+            return [
+                {"entity": "박재범", "class": "인물", "type": "INSTANCE",
+                 "source_chunks": source_chunks, "start": 0, "end": 3},
+                {"entity": "이천이십삼년", "class": "날짜", "type": "INSTANCE",
+                 "source_chunks": source_chunks, "start": 5, "end": 10},
+                {"entity": "삼백억원", "class": "수량", "type": "INSTANCE",
+                 "source_chunks": source_chunks, "start": 12, "end": 16},
+            ]
+
+    docs = {"doc": [{"chunk_id": "c1",
+                     "chunk_text": "박재범은 이천이십삼년 삼백억원 계약을 했다."}]}
+    # 1) 관계 없음 → 날짜·수량 차단, 인물 보존
+    ex = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
+                                      auto_english=False, enable_occupation=False)
+    _m, ents, _r, _d = asyncio.run(ex.extract(docs))
+    kinds = {(e["entity"], e["class"]) for e in ents["doc"]}
+    assert ("박재범", "인물") in kinds
+    assert not any(c in ("날짜", "수량", "시간") for _, c in kinds)
+
+    # 2) 관계 목적어로 참여하는 날짜는 보존, 미참여 수량만 차단
+    class FakeRel:
+        def extract(self, text, *, source_chunks=None):
+            return [{"subject": "박재범", "predicate": "계약일",
+                     "object": "이천이십삼년"}]
+    ex2 = DeterministicKoreanExtractor(ner=FakeNER(), relation_extractor=FakeRel(),
+                                       auto_english=False, enable_occupation=False)
+    _m2, ents2, _r2, _d2 = asyncio.run(ex2.extract(docs))
+    kinds2 = {(e["entity"], e["class"]) for e in ents2["doc"]}
+    assert ("이천이십삼년", "날짜") in kinds2
+    assert not any(n == "삼백억원" for n, _ in kinds2)
+
+    # 3) env kill-switch → 전부 보존
+    monkeypatch.setenv("ONTOKIT_QDT_GATE", "off")
+    ex3 = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
+                                       auto_english=False, enable_occupation=False)
+    _m3, ents3, _r3, _d3 = asyncio.run(ex3.extract(docs))
+    assert any(e["class"] == "날짜" for e in ents3["doc"])
