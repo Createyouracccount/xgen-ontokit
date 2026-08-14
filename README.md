@@ -45,7 +45,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 ```
 (엔티티까지 뽑으려면 NER 주입이 필요하다 — [설치](#설치)·[기본값 표](#기본값--env-스위치-한눈에) 참조)
 
-## 언어 지원 매트릭스 (v0.14.0, 정직하게)
+## 언어 지원 매트릭스 (v0.15.0, 정직하게)
 
 | 축 | 한국어 | 영어 | 혼합 청크 |
 |---|---|---|---|
@@ -373,7 +373,7 @@ python eval_encoder.py holdout
 public 리포라 **인증 없이** 설치된다:
 
 ```bash
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.14.0"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.15.0"
 ```
 버전 고정을 권장한다(기본 on 채널이 마이너 버전에서 바뀐 이력이 있다 — 위 동작 변화 주의 참조).
 `pyproject.toml` dependencies 또는 requirements 에 위 URL 을 추가하면 된다.

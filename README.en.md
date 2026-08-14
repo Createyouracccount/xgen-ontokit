@@ -33,7 +33,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 (Entity extraction requires injecting a NER — see [Install](#install) and the
 [defaults table](#defaults--env-switches-at-a-glance).)
 
-## Language support matrix (v0.14.0, stated honestly)
+## Language support matrix (v0.15.0, stated honestly)
 
 | Axis | Korean | English | Mixed chunks |
 |---|---|---|---|
@@ -107,7 +107,7 @@ pip install "xgen-ontokit[all]"          # everything
 # ⚠️ english-relations needs the spaCy model fetched separately (not a PyPI package):
 #   python -m spacy download en_core_web_sm
 # Direct from GitHub:
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.14.0"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.15.0"
 ```
 
 ## Build — LLM-free Korean·English extraction
@@ -330,7 +330,7 @@ python eval_encoder.py holdout
 The repo is public, so it installs **without authentication**:
 
 ```bash
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.14.0"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.15.0"
 ```
 Pinning is recommended — on-by-default channels have changed across minor versions (see the
 behavior-change notes above). Add the URL to your `pyproject.toml` dependencies or requirements.
