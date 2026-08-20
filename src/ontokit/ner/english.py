@@ -42,6 +42,31 @@ DEFAULT_MIN_SCORE_EN = float(os.environ.get("ONTOKIT_NER_MIN_SCORE_EN", "0") or 
 # 닫힌 문자클래스 규칙 — 임계 보정이 필요 없어 즉시 안전.
 _HAS_LETTER = re.compile(r"[^\W\d_]")
 
+# 어절 경계 복원(R1b, 0816e) — WordPiece 연속 조각이 그대로 개체 표층형으로 방출되던
+# 결함. `word` 의 `##` 를 지우면 '이건 단어 중간 조각'이라는 모델 자신의 신호가 사라져
+# 'Eusebius'→'bius'·'Smash Mouth'→'mash Mouth'·'Sasanian'→'Sasan' 이 인스턴스가 됐다
+# (mixed20k 확정 파편 62건 중 영어 49건, end-to-end 재현 43/49=87.8%).
+# 파이프라인은 문자 오프셋을 이미 주고 있었고(실측), 코드가 그것을 버리고 있었다.
+# → 오프셋으로 어절 중간 절단을 판정해 **원문에서 어절 경계까지 되돌린다**.
+# 확장은 아래 닫힌 문자클래스 안에서만 — 공백·하이픈·아포스트로피·마침표에서 멈춘다
+# (과확장은 없던 오류를 만들고 과소복원은 기존 오류를 덜 고칠 뿐이라 보수 쪽 고정).
+# ⚠️ gate_spans(sg1) 의 영어 적용은 하지 않는다 — 별도 기각 이력이 있고 영어 오살률
+# 미측정. 오프셋은 이 복원의 입력으로만 쓴다. env ONTOKIT_EN_SPAN_REPAIR=off 로 비활성.
+_WORDCHAR_EN = re.compile(r"[0-9A-Za-zÀ-ÿĀ-ſ]")
+# 확장 슬라이스의 공백 정규화 — 원문 개행·다중공백·NBSP 가 라벨로 새는 것을 막는다
+# (0816e 심판 F-11 실측 0.91%: 'Mato Grosso  Demographics'·'Basil\xa0II').
+_WS_COLLAPSE = re.compile(r"\s+")
+_SPAN_REPAIR_EN = os.environ.get("ONTOKIT_EN_SPAN_REPAIR", "").lower() not in ("off", "false", "0")
+
+
+def _expand_to_word(text: str, start: int, end: int) -> tuple[int, int]:
+    """스팬이 어절 중간에서 끊겼으면 어절 경계까지 확장. 아니면 그대로."""
+    while start > 0 and _WORDCHAR_EN.match(text[start - 1]):
+        start -= 1
+    while end < len(text) and _WORDCHAR_EN.match(text[end]):
+        end += 1
+    return start, end
+
 
 class EnglishNER:
     """HF NER 파이프라인 래핑(영어). 지연 로드."""
@@ -61,12 +86,33 @@ class EnglishNER:
                 self._pipe = hf_pipeline("ner", model=self._model,
                                          aggregation_strategy="simple")
 
-    def _to_dicts(self, ents, source_chunks: list[str]) -> list[dict]:
+    def _to_dicts(self, ents, source_chunks: list[str],
+                  text: str | None = None) -> list[dict]:
         out = []
+        seen = set()
         for e in ents or []:
             w = (e.get("word", "") or "").replace("##", "").strip()
             if len(w) < 2:
+                # 표면 컷은 **확장 전** 표층형에 적용한다. 확장 뒤로 밀면 처치 전 차단되던
+                # 1글자 스팬이 어절 전체로 늘어나 **신설 방출 채널**이 생긴다(0816e 심판
+                # F-08 실측: 개체 +6.35%·중복 265건). 그 채널의 정밀도는 미측정이고
+                # 사전 공시에도 없었으므로, 게이트 순서를 원복해 채널을 열지 않는다.
                 continue
+            st, en = e.get("start"), e.get("end")
+            # 어절 경계 복원(R1b) — **스팬이 실제로 확장될 때만** 표층형을 교체한다.
+            # ⚠️0816e 심판 F-07: 초판은 정합 스팬에도 무조건 `text[st:en]` 로 덮어써서
+            # 파이프라인의 정규화된 표기가 원문 표기로 강등됐다('St. Louis'→'St.Louis'
+            # = 같은 도시가 두 라벨로 분열, 개행·NBSP 유입 0.91%). 확장이 일어나지
+            # 않으면 손대지 않는다 — 사전 공시 §1의 트리거 문면 그대로.
+            if (_SPAN_REPAIR_EN and text is not None
+                    and isinstance(st, int) and isinstance(en, int)
+                    and 0 <= st < en <= len(text)):
+                ns, ne = _expand_to_word(text, st, en)
+                if (ns, ne) != (st, en):
+                    st, en = ns, ne
+                    w = _WS_COLLAPSE.sub(" ", text[st:en]).strip()
+                    if len(w) < 2:
+                        continue
             g = e.get("entity_group", "ENTITY")
             if g == "MISC" and not _EMIT_MISC:      # 쓰레기통 라벨 미방출(파일 상단 주석)
                 continue
@@ -75,8 +121,15 @@ class EnglishNER:
             score = float(e.get("score", 1.0) or 1.0)
             if score < DEFAULT_MIN_SCORE_EN:        # 기본 0.0=off, 보정 후 env 로 활성
                 continue
+            # start/end 방출 — koelectra 와 대칭(그쪽은 R13에 이미 보존). 없던 정보를
+            # 만드는 게 아니라 파이프라인이 주던 것을 버리지 않는 것.
+            key = (w, st, en)
+            if key in seen:                 # 서로 다른 조각이 같은 어절로 확장되면 중복 방출
+                continue                    # (0816e F-08 실측 265건). 'He'+'ik' → 'Heikki' ×2
+            seen.add(key)
             out.append({"entity": w, "class": CONLL_LABEL_KO.get(g, g),
-                        "type": "INSTANCE", "source_chunks": source_chunks})
+                        "type": "INSTANCE", "source_chunks": source_chunks,
+                        "start": st, "end": en})
         return out
 
     def entities(self, text: str, *, source_chunks: list[str],
@@ -88,7 +141,7 @@ class EnglishNER:
         except Exception:
             logger.warning("영어 NER 단건 추론 실패 — 해당 청크 엔티티 생략", exc_info=True)
             return []
-        return self._to_dicts(ents, source_chunks)
+        return self._to_dicts(ents, source_chunks, text[:max_len])
 
     def entities_batch(self, texts: list[str], *, source_chunks_list: list[list[str]],
                        max_len: int = MAX_NER_CHARS, batch_size: int = 32) -> list[list[dict]]:
@@ -108,7 +161,7 @@ class EnglishNER:
                         f"배치 출력 {len(batched)} != 입력 {len(chunk)}")
                 for j, ents in enumerate(batched):
                     results[start + j] = self._to_dicts(
-                        ents, source_chunks_list[start + j])
+                        ents, source_chunks_list[start + j], chunk[j][:max_len])
             except Exception:
                 logger.warning(
                     "영어 NER 배치 실패(%d~%d) — 단건 폴백", start, start + len(chunk),
