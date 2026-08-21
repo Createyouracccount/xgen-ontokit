@@ -210,3 +210,61 @@ def test_external_gate_constants_not_silently_zero():
     assert len(g.CLOSED) >= 12
     assert all(d["kw"] and d["why"] and d["src"] for d in g.CLOSED.values())
     assert g.HUMAN_KAPPA > 0 and g.MIN_GOLD_N >= 150
+
+
+# ── 경계 위생 채점기 (R11) ───────────────────────────────────────────────────
+def _kiwi():
+    import pytest
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 없음")
+    return Kiwi()
+
+
+def test_off_morpheme_detects_midmorpheme_cut():
+    """형태소 내부 절단은 off_morpheme 으로 잡히고, 온전한 스팬은 안 잡혀야 한다."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "boundary"))
+    from off_morpheme import score
+    k = _kiwi()
+    t = "코로나19 확산으로 인플루언서 마케팅이 급증했다"
+    cut = t.index("나19")
+    whole = t.index("코로나19")
+    r = score([(t, cut, cut + 3, None), (t, whole, whole + 5, None)], k)
+    assert r["n"] == 2
+    assert r["off_morpheme"]["k"] >= 1, r
+
+
+def test_josa_tail_detected_and_separate_from_off_morpheme():
+    """조사 꼬리는 별도 버킷 — off_morpheme 과 섞이면 처치 조준이 불가능해진다."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "boundary"))
+    from off_morpheme import score
+    k = _kiwi()
+    t = "삼성전자가 실적을 발표했다"
+    r = score([(t, 0, len("삼성전자가"), None)], k)
+    assert r["josa_tail"]["k"] + r["off_morpheme"]["k"] == 1
+    assert r["off_morpheme"]["k"] == 0, r      # 어절 경계는 형태소 경계 — 절단 아님
+
+
+def test_word_mismatch_catches_space_insertion():
+    """HF 가 삽입한 공백(`140 %` vs `140%`)을 잡아야 한다."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "boundary"))
+    from off_morpheme import score
+    k = _kiwi()
+    t = "전년 대비 140% 늘었다"
+    st = t.index("140%")
+    r = score([(t, st, st + 4, "140 %")], k)
+    assert r["word_mismatch"]["k"] == 1, r
+
+
+def test_score_reports_denominator():
+    """판례 16 — 비율만 내고 분모를 안 내면 임계가 무력화된다."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "boundary"))
+    from off_morpheme import score
+    r = score([], _kiwi())
+    assert r["n"] == 0 and all("k" in r[b] for b in
+                               ("off_morpheme", "josa_tail", "word_mismatch"))
