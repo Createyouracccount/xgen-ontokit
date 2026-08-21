@@ -137,3 +137,30 @@ def test_packet_injects_coexistence_warning():
     pack2, _ = build(_entries(), seed=5, instructions={"값": ["참", "거짓"]})
     assert "공존_경고" in pack2["판정지침"]
     assert pack2["판정지침"]["값"] == ["참", "거짓"]
+
+
+def test_context_prefers_standalone_occurrence():
+    """근거 컨텍스트는 **독립 출현을 우선**한다 — R7 지적·R10 재발.
+
+    구 생성기는 첫 출현을 잡아 짧은 라벨이 다른 단어 내부에 걸렸다.
+    실측: `서부` → 심판이 본 것은 `발굴에서부터`·`단계에서부터` 뿐이고
+    실제 개체 자리 `남동·동서·남부·서부·중부발전` 은 못 봤다. R10 에서 14/152=9.2%.
+    """
+    from context import contexts
+
+    chunks = [
+        {"chunk_text": "후보물질 발굴에서부터 임상 허가까지 진행한다."},
+        {"chunk_text": "한국전력과 남동·동서·남부·서부·중부발전 등 5개 자회사가 있다."},
+    ]
+    got = contexts(["서부"], chunks)["서부"]
+    # 독립 출현(`·서부·`)이 선택돼야 한다
+    assert any("중부발전" in c for c in got), got
+    assert not any("발굴에서부터" in c for c in got), got
+
+    # 독립 출현이 없으면 [내부출현] 표시를 달아 넘긴다 — 조각이라는 정보다
+    got2 = contexts(["부터"], chunks)["부터"]
+    assert all(c.startswith("[내부출현]") for c in got2), got2
+
+    # 원문에 없으면 그 사실을 알린다
+    got3 = contexts(["없는문자열"], chunks)["없는문자열"]
+    assert "찾지 못함" in got3[0]
