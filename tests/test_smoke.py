@@ -2206,3 +2206,37 @@ def test_r11_offset_slice_falls_back_without_text():
     finally:
         os.environ.pop("ONTOKIT_NER_OFFSET_SLICE", None)
         importlib.reload(m)
+
+
+def test_r11_offset_slice_wired_through_batch_path():
+    """배치 경로가 text 를 `_to_dicts` 에 실제로 넘기는가 — **배선** 시험.
+
+    R7 교훈: 배선을 안 타는 회귀 테스트는 무가치하다(`if False:` 로 죽여도 통과했다).
+    여기서는 entities_batch() 를 타고 나온 문자열이 원문 슬라이스인지 본다.
+    배선이 끊기면 word 그대로 나와 이 단언이 깨진다.
+
+    e2e 실측(ui_news100 538청크, 우리 KoElectraNER 클래스 경유):
+      현행(simple·word)  원문에 없는 문자열 84/1774 = 4.74%
+      simple + 슬라이스   0/1774 = 0.00%
+    """
+    import importlib, os
+    import ontokit.ner.koelectra as m
+    text = "전년 대비 140% 늘었고 4·5홀에서 우승했다"
+    st1, st2 = text.index("140%"), text.index("4·5홀")
+    fake = [[{"word": "140 %", "entity_group": "QT", "score": 0.9,
+              "start": st1, "end": st1 + 4},
+             {"word": "4 · 5홀", "entity_group": "AF", "score": 0.9,
+              "start": st2, "end": st2 + 4}]]
+
+    os.environ["ONTOKIT_NER_OFFSET_SLICE"] = "on"
+    try:
+        importlib.reload(m)
+        ner = m.KoElectraNER(pipeline=lambda *a, **k: fake)
+        out = ner.entities_batch([text], source_chunks_list=[["c0"]])
+        got = {e["entity"] for e in out[0]}
+        assert got == {"140%", "4·5홀"}, got
+        for s in got:
+            assert s in text, f"{s!r} 가 원문에 없다 — 배선 미작동"
+    finally:
+        os.environ.pop("ONTOKIT_NER_OFFSET_SLICE", None)
+        importlib.reload(m)
