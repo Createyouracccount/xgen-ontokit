@@ -324,3 +324,45 @@ def test_paired_bootstrap_is_deterministic_and_checks_pairing():
     assert a == b and a["관측차"] > 0
     with pytest.raises(ValueError):
         p.paired_bootstrap([True], [True, False])
+
+
+# ── 분석셋/잠금셋 분리 (G3 조건 ②) ───────────────────────────────────────────
+def _holdout():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "holdout"))
+    import split as m
+    return m
+
+
+def test_split_is_stable_when_items_are_added():
+    """항목이 추가돼도 기존 항목의 소속이 바뀌면 안 된다 — 셔플이 아니라 해시를 쓰는 이유.
+
+    소속이 바뀌면 이전 라운드에 열지 않았던 잠금셋 항목이 분석셋으로 흘러 오염된다.
+    """
+    m = _holdout()
+    a = m.split([f"L{i}" for i in range(50)], "s1")
+    b = m.split([f"L{i}" for i in range(80)], "s1")
+    for x in a["locked"]:
+        assert x in b["locked"], x
+    for x in a["analysis"]:
+        assert x in b["analysis"], x
+
+
+def test_split_deterministic_and_disjoint():
+    m = _holdout()
+    a = m.split([f"L{i}" for i in range(200)], "s2", 0.4)
+    b = m.split([f"L{i}" for i in range(200)], "s2", 0.4)
+    assert a == b
+    assert not (set(a["locked"]) & set(a["analysis"]))
+    assert a["n_locked"] + a["n_analysis"] == 200
+    assert 60 < a["n_locked"] < 100          # 40% ± 여유
+
+
+def test_locked_access_over_limit_is_flagged(tmp_path):
+    """라운드당 2회째 접근이 조용히 통과하면 장부의 존재 의미가 없다."""
+    m = _holdout()
+    lg = m.Ledger(str(tmp_path / "access.json"))
+    assert lg.access("R12", "게이트 채점", 50)["초과"] is False
+    second = lg.access("R12", "다시 봄", 50)
+    assert second["초과"] is True and "경고" in second
+    assert m.Ledger(str(tmp_path / "access.json")).summary()["초과_라운드"] == ["R12"]
