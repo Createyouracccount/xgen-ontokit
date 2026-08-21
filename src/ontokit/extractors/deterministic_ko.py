@@ -365,6 +365,17 @@ class DeterministicKoreanExtractor:
         if n_dropped:
             logger.info("라벨 위생 게이트: 파편 %d건 드랍", n_dropped)
 
+        # ②'' 접미 조각 게이트 (R6) — 위생 게이트가 문법으로 못 잡는 절단 조각
+        #   ('웍스'←올리브네트웍스 · '날드'←맥도날드 · '베이션'←이노베이션)을
+        #   **좌측 경계 폐쇄 검사**로 드랍한다. 개체명이면 코퍼스 어딘가에서 왼쪽
+        #   경계가 열린 채 등장해야 한다 — 모든 출현에서 왼쪽이 단어문자면 조각이다.
+        #   위생 게이트 **직후**여야 한다: 코퍼스 전문이 필요하고(ko_ner_buf),
+        #   타이핑 단계 전에 조각을 없애야 오염이 하류로 안 번진다.
+        #   공시 `eval_runs/bench/demo_roster/r6_predeclare.md`.
+        if ko_ner_buf:
+            from ontokit.ner.suffix_fragment import drop_suffix_fragments
+            drop_suffix_fragments(all_entities, "\n".join(t for _, t, _ in ko_ner_buf))
+
         # ②" 정의문 인스턴스 타이핑 (ABox↔TBox 브리지) — 정의문 주어가 NER
         #   개체면 subClassOf 대신 rdf:type. 본질 진단(0714): 계층 클래스 13,441
         #   중 인스턴스 도달 0(완전 분리) → GraphRAG 계층 leg 영구 공회전 수복.

@@ -1801,3 +1801,86 @@ def test_left_complete_ko_guards():
     i = "이창양 산업통상자원부 장관".find("자원부")
     ents = [{"entity": "자원부", "start": i, "end": i + 3}]
     assert SA.align_spans("이창양 산업통상자원부 장관", ents, kiwi)[0]["entity"] == "자원부"
+
+
+def test_suffix_fragment_left_closed(monkeypatch):
+    """R6 접미 조각 게이트 — 좌측 경계 폐쇄 검사.
+
+    R4 는 "회귀가 처치 코드를 한 줄도 실행하지 않는다"로 기각됐다. 이 테스트는
+    처치 함수를 직접 호출하고, **잡아야 할 것과 잡으면 안 되는 것을 모두** 건다.
+
+    ⚠️ 처치는 공격 심판 REJECT 후 **기본 off** 다. 드랍 경로를 타려면 켜야 한다.
+    """
+    import importlib
+
+    monkeypatch.setenv("ONTOKIT_SUFFIX_FRAGMENT", "on")
+    import ontokit.ner.suffix_fragment as _sf
+    importlib.reload(_sf)
+    left_closed, drop_suffix_fragments = _sf.left_closed, _sf.drop_suffix_fragments
+
+    corpus = (
+        "BMW 오픈이노베이션 행사가 열렸다. 맥도날드와 SK텔레콤이 참여했다.\n"
+        "CJ올리브네트웍스도 명단에 있다. 펜실베이니아 주립대 연구진이 발표했다.\n"
+        "서울추모공원 인근에서 진행됐다."
+    )
+
+    # ① 조각은 잡는다 — 코퍼스 전체에서 왼쪽 경계가 한 번도 안 열린다
+    for frag in ("베이션", "날드", "레콤", "웍스", "모공원"):
+        assert left_closed(frag, corpus), frag
+
+    # ② 정상 라벨은 안 잡는다 — 어딘가에서 왼쪽 경계가 열린다
+    for ok in ("맥도날드", "SK텔레콤", "주립대", "오픈이노베이션", "BMW"):
+        assert not left_closed(ok, corpus), ok
+
+    # ③ 1글자 라벨은 손대지 않는다(판단 불가)
+    assert not left_closed("날", corpus)
+
+    # ④ 코퍼스에 없는 라벨은 표적이 아니다 — 출현 0회면 False
+    assert not left_closed("없는회사이름", corpus)
+
+    # ⑤ in-place 드랍 — 레코드 단위로 지우고 건수를 반환한다
+    ents = {
+        "doc1": [{"entity": "맥도날드", "class": "기관"},
+                 {"entity": "날드", "class": "기관"}],
+        "doc2": [{"entity": "날드", "class": "기관"},
+                 {"entity": "주립대", "class": "기관"}],
+    }
+    n = drop_suffix_fragments(ents, corpus)
+    assert n == 2, n                                   # '날드' 레코드 2건
+    assert [e["entity"] for e in ents["doc1"]] == ["맥도날드"]
+    assert [e["entity"] for e in ents["doc2"]] == ["주립대"]
+
+    # ⑥ 빈 입력에 터지지 않는다
+    assert drop_suffix_fragments({}, corpus) == 0
+    assert drop_suffix_fragments({"d": [{"entity": "X"}]}, "") == 0
+
+
+def test_suffix_fragment_default_off(monkeypatch):
+    """**기본 off** 확인 — 공격 심판 REJECT(0821) 후 처분.
+
+    R4 가 env 경로 미검증으로 지적받은 전례가 있어 on/off/미설정 세 경우를 전부 건다.
+    """
+    import importlib
+
+    import ontokit.ner.suffix_fragment as SF
+
+    # ① 미설정 = 기본 off — 아무것도 지우지 않는다
+    monkeypatch.delenv("ONTOKIT_SUFFIX_FRAGMENT", raising=False)
+    importlib.reload(SF)
+    assert SF.ENABLED is False
+    ents = {"d": [{"entity": "날드", "class": "기관"}]}
+    assert SF.drop_suffix_fragments(ents, "맥도날드가 있다") == 0
+    assert len(ents["d"]) == 1
+
+    # ② 명시 off
+    monkeypatch.setenv("ONTOKIT_SUFFIX_FRAGMENT", "off")
+    importlib.reload(SF)
+    assert SF.ENABLED is False
+
+    # ③ 명시 on — 켜면 실제로 지운다
+    monkeypatch.setenv("ONTOKIT_SUFFIX_FRAGMENT", "on")
+    importlib.reload(SF)
+    assert SF.ENABLED is True
+    ents = {"d": [{"entity": "날드", "class": "기관"}]}
+    assert SF.drop_suffix_fragments(ents, "맥도날드가 있다") == 1
+    assert ents["d"] == []
