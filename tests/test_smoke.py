@@ -1752,3 +1752,52 @@ def test_qdt_ghost_gate(monkeypatch):
                                        auto_english=False, enable_occupation=False)
     _m3, ents3, _r3, _d3 = asyncio.run(ex3.extract(docs))
     assert any(e["class"] == "날짜" for e in ents3["doc"])
+
+
+def test_left_complete_ko_guards():
+    """R5 좌측 복합명사 완성 — 수리 대상은 발화하고 오살군은 차단되는가.
+
+    ⛔ R4 기각 사유 중 하나가 "회귀 스위트가 이 코드를 한 줄도 실행하지 않는다"였다
+    (심판 C, grep 0건). 이 테스트가 그 수리다. 공격 사례는 심판이 제공한 것을 쓴다.
+    """
+    from kiwipiepy import Kiwi
+    import ontokit.ner.span_align as SA
+
+    kiwi = Kiwi()
+
+    def run(text, surface):
+        i = text.find(surface)
+        assert i >= 0
+        ents = [{"entity": surface, "start": i, "end": i + len(surface)}]
+        prev = SA._LEFT_COMPLETE_KO
+        SA._LEFT_COMPLETE_KO = True
+        try:
+            return SA.align_spans(text, ents, kiwi)[0]["entity"]
+        finally:
+            SA._LEFT_COMPLETE_KO = prev
+
+    # 수리 대상 — 반드시 확장돼야 한다
+    assert run("이창양 산업통상자원부 장관", "자원부") == "산업통상자원부"
+    assert run("미국 원자력규제위원회 NRC", "제위원회") == "원자력규제위원회"
+    assert run("고 이휘소 박사가", "휘소") == "이휘소"
+    assert run("전국경제인연합회는", "연합회") == "전국경제인연합회"
+
+    # sg1 기각 사유(XPN/MM 접두) — 차단
+    for t, w in [("반정부 시위", "정부"), ("신정부 출범", "정부"), ("현정부 정책", "정부")]:
+        assert run(t, w) == w, f"XPN/MM 가드 실패: {t}"
+
+    # 심판 C 공격: NNG 수식어 — 스톱리스트가 막아야 한다
+    for t, w in [("괴뢰정부를 세웠다", "정부"), ("역대정부는 실패", "정부"),
+                 ("자국정부에 요청", "정부"), ("현지정부와 협의", "정부"),
+                 ("기존정부 정책", "정부"), ("일부의원이 반대", "의원"),
+                 ("관련부처가 대응", "부처"), ("내년삼성전자 실적", "삼성전자")]:
+        assert run(t, w) == w, f"스톱리스트 실패: {t}"
+
+    # 심판 C 공격: Kiwi 다어절 토큰 — 표층 공백 검사가 막아야 한다
+    assert run("소프트웨어 개발보안 강화", "보안") == "보안"
+    assert run("신종 코로나바이러스 감염증 확산", "코로") == "코로"
+
+    # 기본값은 off — 플래그 없이는 아무 일도 일어나지 않는다
+    i = "이창양 산업통상자원부 장관".find("자원부")
+    ents = [{"entity": "자원부", "start": i, "end": i + 3}]
+    assert SA.align_spans("이창양 산업통상자원부 장관", ents, kiwi)[0]["entity"] == "자원부"
