@@ -268,3 +268,59 @@ def test_score_reports_denominator():
     r = score([], _kiwi())
     assert r["n"] == 0 and all("k" in r[b] for b in
                                ("off_morpheme", "josa_tail", "word_mismatch"))
+
+
+# ── 대응 설계 통계 (G3 조건 ①) ───────────────────────────────────────────────
+def _paired():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "stats"))
+    import paired
+    return paired
+
+
+def test_mcnemar_zero_discordant_is_undefined_not_one():
+    """불일치 쌍 0 을 p=1.0 으로 내면 '처치 무효과'와 '무표본'이 구별되지 않는다.
+
+    무증상 0 의심 원칙 — 0 은 판정 근거가 아니라 배선 의심 신호다.
+    """
+    r = _paired().mcnemar_exact(0, 0)
+    assert r["p"] is None and r["n_discordant"] == 0
+
+
+def test_mcnemar_direction_and_significance():
+    """R11 실측값(b=4, c=28)이 유의한 개선으로 나와야 한다."""
+    r = _paired().mcnemar_exact(4, 28)
+    assert r["방향"] == "개선" and r["p"] < 0.05
+    assert _paired().mcnemar_exact(28, 4)["방향"] == "악화"
+
+
+def test_mcnemar_symmetric_pvalue():
+    """b 와 c 를 바꿔도 p 는 같아야 한다 — 방향만 다르다."""
+    p = _paired()
+    assert p.mcnemar_exact(4, 28)["p"] == p.mcnemar_exact(28, 4)["p"]
+
+
+def test_required_gold_beats_unpaired_by_order_of_magnitude():
+    """대응 설계의 존재 이유 — 비대응 ~1450건 대비 자릿수로 싸야 한다."""
+    r = _paired().required_gold(0.80, 0.20)
+    assert r["필요_골드"] < 200, r
+
+
+def test_required_discordant_rejects_null_effect():
+    """delta_ratio=0.5 는 효과 0 — 어떤 표본으로도 탐지 불가임을 명시해야 한다."""
+    p = _paired()
+    assert p.required_discordant(0.5) == -1
+    assert p.required_gold(0.5, 0.2)["필요_골드"] is None
+
+
+def test_paired_bootstrap_is_deterministic_and_checks_pairing():
+    """같은 seed = 같은 결과(결정성 봉인). 길이 불일치는 짝짓기 결함이므로 예외."""
+    import pytest
+    p = _paired()
+    before = [True] * 30 + [False] * 70
+    after = [True] * 50 + [False] * 50
+    a = p.paired_bootstrap(before, after, n_boot=300, seed=7)
+    b = p.paired_bootstrap(before, after, n_boot=300, seed=7)
+    assert a == b and a["관측차"] > 0
+    with pytest.raises(ValueError):
+        p.paired_bootstrap([True], [True, False])
