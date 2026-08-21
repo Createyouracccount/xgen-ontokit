@@ -1884,3 +1884,55 @@ def test_suffix_fragment_default_off(monkeypatch):
     ents = {"d": [{"entity": "날드", "class": "기관"}]}
     assert SF.drop_suffix_fragments(ents, "맥도날드가 있다") == 1
     assert ents["d"] == []
+
+
+def test_suffix_fragment_pipeline_drop(monkeypatch):
+    """R6 **파이프라인 레벨** 드랍 관측 — 공격 심판 재회부 조건 3.
+
+    ⛔ 기존 테스트는 `drop_suffix_fragments()` 를 **직접 호출**했다. 공격 심판이
+       스택 프로브로 실측한 바, 배선(`deterministic_ko.py`)은 회귀에서 7회 발화하나
+       **매번 0건 드랍**이었다 — 즉 배선이 실제로 무언가를 지우는 것을 회귀가
+       한 번도 관측하지 못했다. R4 가 정확히 이 사유로 기각된 전례가 있다(판례 27).
+
+    이 테스트는 `extract()` 전 경로를 타고 **드랍이 실제로 일어남**을 건다.
+    """
+    try:
+        from ontokit import DeterministicKoreanExtractor
+    except ImportError:
+        pytest.skip("의존성 미설치")
+
+    monkeypatch.setenv("ONTOKIT_SUFFIX_FRAGMENT", "on")
+    import importlib
+
+    import ontokit.ner.suffix_fragment as _sf
+    importlib.reload(_sf)
+    assert _sf.ENABLED is True
+
+    class _MockNER:
+        """'날드'(조각)와 '맥도날드'(정상)를 둘 다 방출한다."""
+
+        def entities(self, text, *, source_chunks):
+            return [{"entity": s, "class": "기관", "type": "INSTANCE",
+                     "source_chunks": source_chunks}
+                    for s in ("맥도날드", "날드") if s in text]
+
+    ext = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False)
+    docs = {"d": [
+        {"chunk_id": "c1", "chunk_text": "맥도날드가 신메뉴를 출시했다고 밝혔다."},
+        {"chunk_id": "c2", "chunk_text": "맥도날드 매장은 전국에 있다고 한다."},
+    ]}
+    _concepts, ents, *_ = asyncio.run(ext.extract(docs))
+    got = {e["entity"] for es in ents.values() for e in es}
+
+    # 배선이 실제로 지웠다 — '날드' 는 원문 모든 출현에서 왼쪽이 단어문자
+    assert "날드" not in got, got
+    # 정상 라벨은 살아남았다 — 오살이 없음을 같은 경로에서 확인
+    assert "맥도날드" in got, got
+
+    # off 로 되돌리면 같은 경로에서 '날드' 가 살아남는다(대조군)
+    monkeypatch.setenv("ONTOKIT_SUFFIX_FRAGMENT", "off")
+    importlib.reload(_sf)
+    ext2 = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False)
+    _c2, ents2, *_ = asyncio.run(ext2.extract(docs))
+    got2 = {e["entity"] for es in ents2.values() for e in es}
+    assert "날드" in got2, got2      # 처치가 껐을 때 살아 있어야 대조가 성립
