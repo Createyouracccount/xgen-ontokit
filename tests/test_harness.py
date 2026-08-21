@@ -164,3 +164,49 @@ def test_context_prefers_standalone_occurrence():
     # 원문에 없으면 그 사실을 알린다
     got3 = contexts(["없는문자열"], chunks)["없는문자열"]
     assert "찾지 못함" in got3[0]
+
+
+# ── 외부 좌표 게이트 (0822) ──────────────────────────────────────────────────
+def test_external_gate_blocks_lexicon_stoplist():
+    """0821l 이 차기 처치로 지정했던 어휘 스톱리스트가 C1 로 차단되어야 한다."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
+    from external_gate import check_path
+    hits = check_path("문화·제도 보통명사 필터 스톱리스트 추가")
+    assert "C1" in hits
+
+
+def test_external_gate_blocks_confidence_threshold():
+    """신뢰도 임계는 우리 실측(0.9→21.1%)으로 무효 — C2 차단."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
+    from external_gate import check_path
+    assert "C2" in check_path("min_score 임계값 상향으로 정밀도 확보")
+
+
+def test_external_gate_passes_open_path():
+    """열린 경로(P279 비대칭 게이트)는 통과해야 한다 — 게이트가 전부 막으면 무용."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
+    from external_gate import check_path
+    assert check_path("Wikidata P279 비대칭 게이트로 개념 거부") == []
+
+
+def test_type_curve_interpolation_is_monotonic():
+    """타입 수가 늘면 기대 정밀도가 내려가야 한다 — 곡선을 뒤집어 쓰면 게이트가 무력화."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
+    from external_gate import interp
+    vals = [interp(n) for n in (4, 18, 66, 1100, 10331)]
+    assert all(a >= b for a, b in zip(vals, vals[1:])), vals
+    assert 52.0 < interp(1100) < 66.0      # 66종과 10331종 사이
+
+
+def test_external_gate_constants_not_silently_zero():
+    """상수 테이블이 비면 게이트가 조용히 통과시킨다 — 무증상 0 의심 원칙."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
+    import external_gate as g
+    assert len(g.CLOSED) >= 12
+    assert all(d["kw"] and d["why"] and d["src"] for d in g.CLOSED.values())
+    assert g.HUMAN_KAPPA > 0 and g.MIN_GOLD_N >= 150
