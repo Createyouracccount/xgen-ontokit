@@ -365,6 +365,21 @@ class DeterministicKoreanExtractor:
         if n_dropped:
             logger.info("라벨 위생 게이트: 파편 %d건 드랍", n_dropped)
 
+        # ②′ 어절 경계 정합 (R7) — 접미·접두 절단을 **한 규칙으로** 복원.
+        #   스팬이 속한 어절의 핵심부(조사·어미 제거)로 되돌린다. 단 원본 라벨이
+        #   코퍼스에서 **독립 어절 핵심으로 출현하면 확장하지 않는다**(코퍼스 증거 가드) —
+        #   `한국`(독립 25회)→`한국경제` 같은 과확장을 막는다.
+        #   R6(제거)와 달리 **복원**이라 재현율이 오른다. 기본 off.
+        #   공시 `eval_runs/bench/demo_roster/r7_predeclare.md`.
+        if ko_ner_buf:
+            from ontokit.ner.word_boundary import repair as _wb_repair
+            _texts = {}
+            for _dn, _tx, _sc in ko_ner_buf:
+                for _cid in (_sc or []):
+                    _texts[_cid] = _tx
+            _wb_repair(all_entities, _texts,
+                       "\n".join(t for _, t, _ in ko_ner_buf), self.nouns.kiwi)
+
         # ②'' 접미 조각 게이트 (R6) — 위생 게이트가 문법으로 못 잡는 절단 조각
         #   ('웍스'←올리브네트웍스 · '날드'←맥도날드 · '베이션'←이노베이션)을
         #   **좌측 경계 폐쇄 검사**로 드랍한다. 개체명이면 코퍼스 어딘가에서 왼쪽

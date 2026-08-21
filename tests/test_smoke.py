@@ -1936,3 +1936,67 @@ def test_suffix_fragment_pipeline_drop(monkeypatch):
     _c2, ents2, *_ = asyncio.run(ext2.extract(docs))
     got2 = {e["entity"] for es in ents2.values() for e in es}
     assert "날드" in got2, got2      # 처치가 껐을 때 살아 있어야 대조가 성립
+
+
+def test_word_boundary_core_and_guard(monkeypatch):
+    """R7 어절 경계 정합 — 확장·가드·미발화 세 경로 전부.
+
+    R4 는 "회귀가 처치 코드를 한 줄도 실행하지 않는다"로 기각됐다(판례 27).
+    잡아야 할 것·막아야 할 것·건드리면 안 되는 것을 모두 건다.
+    """
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 미설치")
+
+    import importlib
+
+    monkeypatch.setenv("ONTOKIT_WORD_BOUNDARY", "on")
+    import ontokit.ner.word_boundary as WB
+    importlib.reload(WB)
+    assert WB.ENABLED is True
+
+    kiwi = Kiwi()
+    text = "CJ올리브네트웍스가 참여했다. 한국경제의 회복이 관건이다. 한국은 수출국이다."
+    # 오프셋은 계산하지 말고 원문에서 **찾는다** — 손으로 센 오프셋은 틀린다
+    i_wk, i_cj, i_hk = text.index("웍스"), text.index("CJ"), text.index("한국경제")
+
+    # ① 어절 핵심 — 접미·접두 조각 모두 같은 규칙으로 복원된다
+    assert WB.core_at(text, i_wk, i_wk + 2, kiwi) == "CJ올리브네트웍스"   # 접미 조각
+    assert WB.core_at(text, i_cj, i_cj + 2, kiwi) == "CJ올리브네트웍스"   # 접두 조각
+
+    # ② 조사가 떨어진다 — '가'/'의'/'은' 을 삼키지 않는다
+    assert not WB.core_at(text, i_cj, i_cj + 2, kiwi).endswith("가")
+
+    # ③ 가운뎃점은 나열 구분자 — 병합하지 않는다
+    t2 = "텐센트·바이트댄스가 나섰다."
+    assert WB.core_at(t2, 0, 3, kiwi) == "텐센트"
+
+    # ④ 코퍼스 증거 가드 — 원본이 독립 어절 핵심이면 확장 금지
+    cores = WB.corpus_cores(text, kiwi)
+    assert cores.get("한국", 0) > 0          # '한국은' 에서 독립 출현
+    assert cores.get("웍스", 0) == 0         # 조각은 독립 출현하지 않는다
+
+    ents = {"d": [
+        {"entity": "웍스", "start": i_wk, "end": i_wk + 2, "source_chunks": ["c1"]},
+        {"entity": "한국", "start": i_hk, "end": i_hk + 2, "source_chunks": ["c1"]},
+    ]}
+    st = WB.repair(ents, {"c1": text}, text, kiwi)
+    got = {e["entity"] for e in ents["d"]}
+    assert "CJ올리브네트웍스" in got, got      # 조각은 복원됐다
+    assert "한국" in got, got                # 독립 단위는 가드가 지켰다
+    assert st["적용"] == 1 and st["가드차단"] == 1, st
+
+    # ⑤ 스팬이 원문과 안 맞으면 건드리지 않는다
+    bad = {"d": [{"entity": "웍스", "start": 0, "end": 2, "source_chunks": ["c1"]}]}
+    assert WB.repair(bad, {"c1": text}, text, kiwi)["적용"] == 0
+    assert bad["d"][0]["entity"] == "웍스"
+
+    # ⑥ 기본 off — 미설정이면 아무것도 하지 않는다
+    monkeypatch.delenv("ONTOKIT_WORD_BOUNDARY", raising=False)
+    importlib.reload(WB)
+    assert WB.ENABLED is False
+    ents2 = {"d": [{"entity": "웍스", "start": i_wk, "end": i_wk + 2,
+                    "source_chunks": ["c1"]}]}
+    assert WB.repair(ents2, {"c1": text}, text, kiwi)["적용"] == 0
+    assert ents2["d"][0]["entity"] == "웍스"
