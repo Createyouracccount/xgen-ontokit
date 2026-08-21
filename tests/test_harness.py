@@ -366,3 +366,73 @@ def test_locked_access_over_limit_is_flagged(tmp_path):
     second = lg.access("R12", "다시 봄", 50)
     assert second["초과"] is True and "경고" in second
     assert m.Ledger(str(tmp_path / "access.json")).summary()["초과_라운드"] == ["R12"]
+
+
+# ── R12 게이트 채점기 (심판 결과 보기 전 봉인) ────────────────────────────────
+def _gate():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval", "stats"))
+    import r12_gate
+    return r12_gate
+
+
+def test_r12_kappa_undefined_not_faked():
+    """단일 범주 열은 pe=1 이라 κ 미정의 — 0 이나 1 로 위조하면 판례 21 경보가 무력화된다."""
+    g = _gate()
+    assert g.cohen_kappa(["참"] * 5, ["참"] * 5) is None
+    assert g.cohen_kappa(["참", "거짓"] * 3, ["참", "거짓"] * 3) == 1.0
+
+
+def _write(tmp, key_rows, cols):
+    import json
+    kp = tmp / "key.json"
+    json.dump({"seed": "t", "n": len(key_rows), "key": key_rows}, open(kp, "w"))
+    paths = {}
+    for j, col in cols.items():
+        p = tmp / f"v{j}.json"
+        json.dump({"심판": j, "n": len(col),
+                   "verdicts": [{"id": i, "label": f"L{i}", "판정": v, "사유": None}
+                                for i, v in col.items()]}, open(p, "w"))
+        paths[j] = str(p)
+    return str(kp), paths
+
+
+def test_r12_rejects_when_worsening_exceeds(tmp_path):
+    """b >= c 면 기각. 이 분기가 없으면 어떤 결과도 채택으로 미끄러진다."""
+    g = _gate()
+    rows = [{"id": 0, "label": "L0", "group": "A"}, {"id": 1, "label": "L1", "group": "B"}]
+    # A가 참(악화 1) · B가 거짓(악화 1) → b=2, c=0
+    cols = {j: {0: "참", 1: "거짓"} for j in "ABC"}
+    kp, vp = _write(tmp_path, rows, cols)
+    r = g.score(kp, vp)
+    assert r["b_악화"] == 2 and r["c_개선"] == 0 and "기각" in r["판정"]
+
+
+def test_r12_adoption_is_always_marked_provisional(tmp_path):
+    """G3③ 미충족 사실이 판정 문자열에 강제로 실려야 한다 — 호출자가 뺄 수 없다."""
+    g = _gate()
+    rows = [{"id": i, "label": f"L{i}", "group": "A"} for i in range(20)]
+    cols = {j: {i: "거짓" for i in range(20)} for j in "ABC"}     # 전부 개선
+    kp, vp = _write(tmp_path, rows, cols)
+    r = g.score(kp, vp)
+    assert r["c_개선"] == 20 and r["b_악화"] == 0
+    assert "잠정" in r["판정"] and r["G3_미충족"]
+
+
+def test_r12_zero_discordant_is_not_adoption(tmp_path):
+    """불일치 0 을 채택으로 읽으면 안 된다 — 무증상 0 의심 원칙."""
+    g = _gate()
+    rows = [{"id": 0, "label": "L0", "group": "A"}]
+    cols = {j: {0: "판정불가"} for j in "ABC"}
+    kp, vp = _write(tmp_path, rows, cols)
+    r = g.score(kp, vp)
+    assert r["이득률"] is None and "판정 불가" in r["판정"]
+
+
+def test_r12_flags_high_undecided_rate(tmp_path):
+    """판정불가 15% 초과는 컨텍스트 결함 신호 — R10 에서 9.2% 가 실제로 있었다."""
+    g = _gate()
+    rows = [{"id": i, "label": f"L{i}", "group": "A"} for i in range(10)]
+    cols = {j: {i: ("판정불가" if i < 3 else "거짓") for i in range(10)} for j in "ABC"}
+    kp, vp = _write(tmp_path, rows, cols)
+    assert g.score(kp, vp)["판정불가_경보"] is True
