@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 import logging
+import os
 import threading
 from typing import Optional
 
@@ -41,6 +42,39 @@ MAX_NER_CHARS = 1200
 # env ONTOKIT_NER_MIN_SCORE 로 조정(도메인별 재보정 가능).
 DEFAULT_MIN_SCORE = 0.40
 
+# ── R11(0822) 스팬 경계 축 — 둘 다 기본 OFF(env opt-in) ──────────────────────
+# 배경: R10 오류 분해에서 절단(partial)이 32.1%였고, 원인이 형태소가 아니라
+# **서브워드 조각**임이 확정됐다. `인플루언서` → ['인플','##루','##언','##서'] 에서
+# 모델이 가운데 두 조각만 태깅하면 aggregation_strategy="simple" 은 태깅된 토큰끼리만
+# 병합하므로 `루언` 이 그대로 나온다. simple 은 **단어 경계 개념이 없다**.
+#
+# 실측(ui_news100 538청크·min_score 0.40·봉인 채점기 blob 02420fb):
+#   simple  n=3270  off_morpheme 6.88%  josa_tail 1.50%
+#   first   n=3212  off_morpheme 1.43%  josa_tail 29.92%   ← 절단 4.8배 감소
+#   first + word_boundary 트림    off_morpheme 1.49%  josa_tail 0.37%
+# 즉 first 는 절단을 **조사 과다 포함으로 교환**하고, 그 교환분은 기존 조사 트림
+# 규칙(ONTOKIT_WORD_BOUNDARY)이 되돌린다. **둘은 짝이다 — 따로 켜지 말 것.**
+#
+# ⛔ "average"/"max" 금지: 실측 엔티티 −43%/−40%. 조사 서브워드(O 예측)가 평균 점수를
+#    끌어내려 임계 미달로 탈락시키고, max 는 `혁신 STAR상`→`혁신` 으로 단어를 파손한다.
+# ⚠️ 전제조건(확인 완료): tokenizer is_fast=True, continuing_subword_prefix="##".
+#    이게 없으면 HF 가 공백 기반 fallback 휴리스틱을 쓰는데, 한국어 어절 = 개체+조사라
+#    조사를 통째 삼키는 반대 방향 오류가 난다(HF #23322).
+_ALLOWED_AGG = ("simple", "first")
+AGGREGATION = os.environ.get("ONTOKIT_NER_AGGREGATION", "simple").strip().lower()
+if AGGREGATION not in _ALLOWED_AGG:      # average/max 는 실측 기각 — 조용히 통과시키지 않는다
+    raise ValueError(
+        f"ONTOKIT_NER_AGGREGATION={AGGREGATION!r} 불가. 허용: {_ALLOWED_AGG}. "
+        "average/max 는 0822 실측에서 엔티티 −43%/−40% 및 단어 파손으로 기각됐다.")
+
+# 개체 문자열을 HF 의 word 필드가 아니라 **원문 슬라이스**에서 취한다.
+# HF `convert_tokens_to_string` 이 재조립 시 공백을 삽입해 원문에 없는 문자열이 나온다.
+# 우리 뉴스 코퍼스 실측 3.49%(114/3270): `140 %`(원문 `140%`) · `4 · 5홀`(`4·5홀`) ·
+# `94. 40달러`(`94.40달러`) · `newsis. com`(`newsis.com`).
+# ⚠️ aggregation 을 first 로 바꿔도 **이 결함은 안 없어진다**(실측 3.55%) — 숫자·기호
+#    주변 공백이라 서브워드 재조립과 무관하다. 별도 처치다.
+USE_OFFSET_SLICE = os.environ.get("ONTOKIT_NER_OFFSET_SLICE", "").lower() in ("on", "true", "1")
+
 
 class KoElectraNER:
     """HF NER 파이프라인 래핑. 지연 로드(사용 안 하면 안 깔림)."""
@@ -65,13 +99,21 @@ class KoElectraNER:
             if self._pipe is None:
                 from transformers import pipeline as hf_pipeline  # lazy — extras[ner]
                 self._pipe = hf_pipeline("ner", model=self._model,
-                                         aggregation_strategy="simple")
+                                         aggregation_strategy=AGGREGATION)
 
-    def _to_dicts(self, ents, source_chunks: list[str]) -> list[dict]:
-        """HF 파이프라인 원시 출력 → 엔티티 dict (2자 미만 파편 컷 + 한글 클래스명)."""
+    def _to_dicts(self, ents, source_chunks: list[str], text: str = "") -> list[dict]:
+        """HF 파이프라인 원시 출력 → 엔티티 dict (2자 미만 파편 컷 + 한글 클래스명).
+
+        text 를 주고 USE_OFFSET_SLICE 가 켜져 있으면 개체 문자열을 원문에서 슬라이스한다
+        (HF word 필드의 공백 삽입 회피 — 상단 주석 참조). text 가 없으면 word 로 폴백.
+        """
         out = []
         for e in ents or []:
             w = (e.get("word", "") or "").replace("##", "").strip()
+            if USE_OFFSET_SLICE and text:
+                _st, _en = e.get("start"), e.get("end")
+                if _st is not None and _en is not None and 0 <= _st < _en <= len(text):
+                    w = text[_st:_en].strip()
             if len(w) >= 2 and float(e.get("score", 1.0)) >= self._min_score:
                 g = e.get("entity_group", "ENTITY")
                 # start/end 오프셋 보존 (R13) — 스팬-형태소 경계 정렬·윈도우 dedup 의
@@ -91,7 +133,7 @@ class KoElectraNER:
         except Exception:
             logger.warning("NER 단건 추론 실패 — 해당 청크 엔티티 생략", exc_info=True)
             return []
-        out = self._to_dicts(ents, source_chunks)
+        out = self._to_dicts(ents, source_chunks, text[:max_len])
         # R13-1 경량 2패스 — max_len 초과 청크의 후반부(절단 사각) 1회 추가 추론.
         # 실측: 미탐 GT 112표본에서 2패스가 +17건 회수(전반부만은 +8). 문자열 기준
         # union(오프셋은 전반부 기준만 유효 — 후반부 방출분은 오프셋 무효화).
@@ -104,7 +146,7 @@ class KoElectraNER:
                 with self._lock:
                     tail = self._pipe(text[max_len:max_len * 2])
                 seen = {e["entity"] for e in out}
-                for e in self._to_dicts(tail, source_chunks):
+                for e in self._to_dicts(tail, source_chunks, text[max_len:max_len * 2]):
                     if e["entity"] not in seen:
                         e["start"] = e["end"] = None  # 후반부 오프셋은 전문 기준 아님
                         out.append(e)
@@ -140,7 +182,7 @@ class KoElectraNER:
                         f"배치 출력 {len(batched)} != 입력 {len(chunk)}")
                 for j, ents in enumerate(batched):
                     results[start + j] = self._to_dicts(
-                        ents, source_chunks_list[start + j])
+                        ents, source_chunks_list[start + j], chunk[j][:max_len])
             except Exception:
                 logger.warning(
                     "NER 배치 실패(%d~%d) — 단건 폴백", start, start + len(chunk),

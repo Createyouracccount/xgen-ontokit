@@ -2136,3 +2136,73 @@ def test_word_boundary_worsening_is_reachable(monkeypatch):
     # ③ 결론: 악화는 **구조적으로 도달 가능**하다. 임계는 무장돼 있다.
     #    다만 이 코퍼스에서 관측된 확정 악화는 0 이므로, 손실률을 기제의
     #    안전성 증거로 인용해서는 안 된다(코퍼스 특성이다).
+
+
+# ── R11(0822) 스팬 경계 축 — aggregation / offset 슬라이스 ────────────────────
+def test_r11_defaults_are_off():
+    """처치는 기본 OFF. 켜지 않은 빌드의 산출이 바뀌면 결정성 봉인이 깨진다."""
+    import importlib, os
+    os.environ.pop("ONTOKIT_NER_AGGREGATION", None)
+    os.environ.pop("ONTOKIT_NER_OFFSET_SLICE", None)
+    import ontokit.ner.koelectra as m
+    importlib.reload(m)
+    assert m.AGGREGATION == "simple"
+    assert m.USE_OFFSET_SLICE is False
+
+
+def test_r11_rejects_average_and_max():
+    """average/max 는 0822 실측 기각(엔티티 −43%/−40%, 단어 파손). 조용히 통과 금지."""
+    import importlib, os, pytest
+    import ontokit.ner.koelectra as m
+    for bad in ("average", "max"):
+        os.environ["ONTOKIT_NER_AGGREGATION"] = bad
+        try:
+            with pytest.raises(ValueError):
+                importlib.reload(m)
+        finally:
+            os.environ.pop("ONTOKIT_NER_AGGREGATION", None)
+    importlib.reload(m)          # 원상 복구
+    assert m.AGGREGATION == "simple"
+
+
+def test_r11_offset_slice_recovers_original_text():
+    """HF word 필드의 공백 삽입(`140 %`)을 원문 슬라이스가 되돌리는가.
+
+    우리 뉴스 코퍼스 실측 3.49%(114/3270)가 이 유형이다.
+    """
+    import importlib, os
+    from ontokit.ner.koelectra import KoElectraNER
+    text = "전년 대비 140% 늘었다"
+    st = text.index("140%")
+    ent = [{"word": "140 %", "entity_group": "QT", "score": 0.9,
+            "start": st, "end": st + 4}]
+
+    import ontokit.ner.koelectra as m
+    importlib.reload(m)                                   # OFF 상태
+    off = m.KoElectraNER(pipeline=lambda *a, **k: ent)
+    assert off._to_dicts(ent, ["c0"], text)[0]["entity"] == "140 %"   # 현행 결함 재현
+
+    os.environ["ONTOKIT_NER_OFFSET_SLICE"] = "on"
+    try:
+        importlib.reload(m)
+        on = m.KoElectraNER(pipeline=lambda *a, **k: ent)
+        assert on._to_dicts(ent, ["c0"], text)[0]["entity"] == "140%"
+    finally:
+        os.environ.pop("ONTOKIT_NER_OFFSET_SLICE", None)
+        importlib.reload(m)
+
+
+def test_r11_offset_slice_falls_back_without_text():
+    """text 를 못 받으면 word 로 폴백 — 배치 실패 경로에서 빈 문자열이 나오면 안 된다."""
+    import importlib, os
+    import ontokit.ner.koelectra as m
+    os.environ["ONTOKIT_NER_OFFSET_SLICE"] = "on"
+    try:
+        importlib.reload(m)
+        ner = m.KoElectraNER(pipeline=lambda *a, **k: [])
+        ent = [{"word": "삼성전자", "entity_group": "OG", "score": 0.9,
+                "start": 0, "end": 4}]
+        assert ner._to_dicts(ent, ["c0"], "")[0]["entity"] == "삼성전자"
+    finally:
+        os.environ.pop("ONTOKIT_NER_OFFSET_SLICE", None)
+        importlib.reload(m)
