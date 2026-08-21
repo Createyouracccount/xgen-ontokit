@@ -105,12 +105,31 @@ def score(pack, key, verdicts, gain_group, loss_group,
                                 "반대의견 있는 손실후보": loss_dissent,
                                 "도달가능": loss_dissent > 0}}
 
-    # ⑤ 독립성 — 판정 순서와 id 의 상관까지 본다(R7 에서 심판 A 가 ρ=+1.0 이었다)
-    pair, order = {}, {}
+    # ⑤-a **누설 검증** — id 가 집합을 누설하는가. 이것이 0 이어야 ⑤-b 가 무해하다.
+    #    실측: R7(하네스 이전) r = +0.861 → R8(하네스) r = +0.026.
+    ids_sorted = sorted(grp)
+    yv = [1 if grp[i] == gain_group else 0 for i in ids_sorted]
+    mx = (len(ids_sorted) - 1) / 2
+    my = sum(yv) / len(yv)
+    num = sum((k - mx) * (yv[k] - my) for k in range(len(ids_sorted)))
+    den = (sum((k - mx) ** 2 for k in range(len(ids_sorted)))
+           * sum((v - my) ** 2 for v in yv)) ** 0.5
+    leak_r = num / den if den else 0.0
+
+    # ⑤-b 심판별 **판정 순서**와 id 의 상관.
+    #    ⚠️ 이 값이 ±1 이어도 ⑤-a 가 0 이면 **무해**하다 — 팩 배열 순서대로 작업한
+    #    것일 뿐 정답에 도달할 수 없다. R7 재회부 조건 #2(|ρ|>0.3 무효)는 id 가
+    #    집합을 누설하던 조건에서 나온 것이며, 하네스가 그 전제를 제거했다.
+    #    규칙을 없애지 않고 **두 값을 함께** 내어 판단 근거를 남긴다.
+    order = {}
     for j in JUDGES:
-        ids = [v["id"] for v in verdicts[j].values()] if isinstance(
-            verdicts[j], dict) else []
-        order[j] = None
+        seq = [v["id"] for v in verdicts[j].values()]
+        m = (len(seq) - 1) / 2
+        d2 = sum((k - m) ** 2 for k in range(len(seq)))
+        order[j] = round(sum((k - m) * (seq[k] - m)
+                             for k in range(len(seq))) / d2, 4) if d2 else None
+
+    pair = {}
     for a, b in combinations(JUDGES, 2):
         va = [verdicts[a][i]["판정"] for i in complete]
         vb = [verdicts[b][i]["판정"] for i in complete]
@@ -140,6 +159,12 @@ def score(pack, key, verdicts, gain_group, loss_group,
         "leave_one_out": loo,
         "임계_도달가능성": reach,
         "판례21_독립성": pair,
+        "누설검증": {"id↔집합 상관": round(leak_r, 4),
+                     "판정순서↔id 상관": order,
+                     "판정": ("누설 없음 — 순서 상관은 무해"
+                              if abs(leak_r) < 0.15 else
+                              "⛔ id 가 집합을 누설한다. 순서 상관이 유해하다"),
+                     "참고": "R7(하네스 이전) id↔집합 = +0.861"},
         "임계판정": gate,
         "최종": ("채택 후보" if all(g["통과"] for g in gate.values()) and loo_ok
                  and all(r["도달가능"] for r in reach.values()) else "채택 안 함"),
