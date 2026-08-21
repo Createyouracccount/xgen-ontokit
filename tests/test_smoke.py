@@ -2084,3 +2084,55 @@ def test_word_boundary_trim_codepoints():
         text = f"{cp}CBS노컷뉴스 제공"
         i = text.find("CBS")
         assert WB.core_at(text, i, i + 3, kiwi) == "CBS노컷뉴스", hex(ord(cp))
+
+
+def test_word_boundary_worsening_is_reachable(monkeypatch):
+    """R7 **악화 도달 가능성 실증** — 임계가 무장돼 있음을 코드로 보인다.
+
+    R4·R5·R6 이 전부 "악화 범주가 구조적으로 도달 불가 → 임계 무장 해제"로
+    기각됐다. R7 도 처음엔 `SM`→`SM이성수` 를 유일 실증으로 들었으나
+    **심판 3인이 만장일치로 `SM` 을 거짓 판정**해 실증이 무너졌고, `TRIM` 수리
+    후에는 코퍼스 내 확정 악화가 **0** 이 됐다.
+
+    "이 코퍼스에서 0"과 "구조적으로 불가"는 다르다. 이 테스트는 후자가 아님을
+    **구성으로 증명**한다 — 참인 라벨이 확장으로 거짓이 되는 경로가 실재한다.
+    """
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 미설치")
+
+    import importlib
+
+    monkeypatch.setenv("ONTOKIT_WORD_BOUNDARY", "on")
+    import ontokit.ner.word_boundary as WB
+    importlib.reload(WB)
+    kiwi = Kiwi()
+
+    # ① 악화 경로가 실재한다 — 원본이 코퍼스에서 독립 출현하지 않으면
+    #    가드가 못 막고, 참인 개체명이 더 긴 오답으로 확장된다.
+    text = "SM이성수 대표가 참석했다. SM엔터 소속이다."
+    i = text.index("SM")
+    cores = WB.corpus_cores(text, kiwi)
+    assert cores.get("SM", 0) == 0                       # 가드가 발화하지 않는다
+    assert WB.core_at(text, i, i + 2, kiwi) == "SM이성수"  # 회사+인물 병합 = 악화
+
+    ents = {"d": [{"entity": "SM", "start": i, "end": i + 2,
+                   "source_chunks": ["c1"]}]}
+    st = WB.repair(ents, {"c1": text}, text, kiwi)
+    assert st["적용"] == 1 and st["가드차단"] == 0, st
+    assert ents["d"][0]["entity"] == "SM이성수"           # ⚠️ 참 → 거짓
+
+    # ② 가드가 작동하는 대조군 — 원본이 독립 출현하면 막힌다
+    text2 = "네이버부사장이 발표했다. 네이버 주가는 올랐다."
+    j = text2.index("네이버")
+    assert WB.corpus_cores(text2, kiwi).get("네이버", 0) > 0
+    ents2 = {"d": [{"entity": "네이버", "start": j, "end": j + 3,
+                    "source_chunks": ["c1"]}]}
+    st2 = WB.repair(ents2, {"c1": text2}, text2, kiwi)
+    assert st2["적용"] == 0 and st2["가드차단"] == 1, st2
+    assert ents2["d"][0]["entity"] == "네이버"
+
+    # ③ 결론: 악화는 **구조적으로 도달 가능**하다. 임계는 무장돼 있다.
+    #    다만 이 코퍼스에서 관측된 확정 악화는 0 이므로, 손실률을 기제의
+    #    안전성 증거로 인용해서는 안 된다(코퍼스 특성이다).
