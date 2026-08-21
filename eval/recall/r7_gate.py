@@ -130,12 +130,14 @@ def main(work):
         "임계판정": gate,
         "최종": "채택 후보" if all(g["통과"] for g in gate.values()) else "채택 안 함",
     }
-    for d in (res["손실(소멸 중 참)"], res["이득(신설 중 참)"]):
-        d.pop("_maj", None)
+    # ⚠️ detail 을 **먼저** 만든다 — `_maj` 를 지운 뒤 참조하면 KeyError 다(실측).
+    #    이 수정은 **출력 순서만** 바꾼다. 임계·집계 규칙은 한 줄도 건드리지 않았다.
     detail = [{"id": i, "label": items[i]["label"], "집합": items[i]["_set"],
                "표": [V[j][i]["판정"] for j in JUDGES],
                "다수결": (G["_maj"] if items[i]["_set"] == "소멸" else N["_maj"]).get(i)}
               for i in complete]
+    for d in (res["손실(소멸 중 참)"], res["이득(신설 중 참)"]):
+        d.pop("_maj", None)
     json.dump({"요약": res, "항목별": detail},
               open(os.path.join(work, "r7_gate_result.json"), "w", encoding="utf-8"),
               ensure_ascii=False, indent=1)
