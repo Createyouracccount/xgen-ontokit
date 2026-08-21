@@ -2000,3 +2000,87 @@ def test_word_boundary_core_and_guard(monkeypatch):
                     "source_chunks": ["c1"]}]}
     assert WB.repair(ents2, {"c1": text}, text, kiwi)["적용"] == 0
     assert ents2["d"][0]["entity"] == "웍스"
+
+
+def test_word_boundary_pipeline_repair(monkeypatch):
+    """R7 **파이프라인 레벨** 복원 관측 — 공격 심판 재회부 조건 7.
+
+    ⛔ 기존 테스트는 헬퍼를 직접 호출해서 배선을 검증하지 못했다. 공격 심판의
+       결정 실험: `deterministic_ko.py` 의 배선을 `if False:` 로 죽여도
+       **181 passed 로 바이트 동일**했다(내가 재현 확인). R4·R6 와 같은 결함이다.
+
+    이 테스트는 `extract()` 전 경로를 타므로 **배선을 죽이면 실패한다.**
+    """
+    try:
+        from ontokit import DeterministicKoreanExtractor
+    except ImportError:
+        pytest.skip("의존성 미설치")
+
+    import importlib
+
+    monkeypatch.setenv("ONTOKIT_WORD_BOUNDARY", "on")
+    import ontokit.ner.word_boundary as WB
+    importlib.reload(WB)
+
+    class _MockNER:
+        """'웍스'(접미 조각) 와 '올리브'(접두 조각) 를 방출한다."""
+
+        def entities(self, text, *, source_chunks):
+            out = []
+            for s in ("웍스", "올리브"):
+                i = text.find(s)
+                if i >= 0:
+                    out.append({"entity": s, "class": "기관", "type": "INSTANCE",
+                                "start": i, "end": i + len(s),
+                                "source_chunks": source_chunks})
+            return out
+
+    ext = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False)
+    docs = {"d": [
+        {"chunk_id": "c1", "chunk_text": "CJ올리브네트웍스가 사업을 확대한다고 밝혔다."},
+        {"chunk_id": "c2", "chunk_text": "CJ올리브네트웍스는 계약을 체결했다고 한다."},
+    ]}
+    _c, ents, *_ = asyncio.run(ext.extract(docs))
+    got = {e["entity"] for es in ents.values() for e in es}
+
+    # 배선이 실제로 복원했다 — 접미·접두 조각이 같은 어절 핵심으로 수렴한다
+    assert "CJ올리브네트웍스" in got, got
+    assert "웍스" not in got and "올리브" not in got, got
+
+    # off 대조군 — 껐을 때 조각이 살아 있어야 처치가 원인임이 분리된다
+    monkeypatch.setenv("ONTOKIT_WORD_BOUNDARY", "off")
+    importlib.reload(WB)
+    ext2 = DeterministicKoreanExtractor(ner=_MockNER(), enable_relations=False)
+    _c2, ents2, *_ = asyncio.run(ext2.extract(docs))
+    got2 = {e["entity"] for es in ents2.values() for e in es}
+    assert "웍스" in got2, got2
+    assert "CJ올리브네트웍스" not in got2, got2
+
+
+def test_word_boundary_trim_codepoints():
+    """중간점·기호 **코드포인트별** 비병합 — 공격 심판 재회부 조건 7.
+
+    ⛔ 초판 테스트는 U+00B7 하나만 검사해서 원리적으로 실패할 수 없었다(동어반복).
+       실제 코퍼스의 `현대차‧기아` 는 **U+2027** 이라 통과했고 `기아`(참)를 소멸시켰다.
+    """
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 미설치")
+
+    import importlib
+
+    import ontokit.ner.word_boundary as WB
+    importlib.reload(WB)
+    kiwi = Kiwi()
+
+    # 중간점 6종 — 전부 나열 구분자다. 어느 하나라도 빠지면 병합이 난다
+    for cp in ("·", "‧", "・", "･", "•", "∙"):
+        text = f"텐센트{cp}바이트댄스가 나섰다."
+        assert WB.core_at(text, 0, 3, kiwi) == "텐센트", (hex(ord(cp)), text)
+
+    # 선행 기호 — 개체명 앞에 붙어도 삼키지 않는다
+    for cp in ("※", "ⓒ", "△", "③"):
+        text = f"{cp}CBS노컷뉴스 제공"
+        i = text.find("CBS")
+        assert WB.core_at(text, i, i + 3, kiwi) == "CBS노컷뉴스", hex(ord(cp))
