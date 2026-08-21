@@ -2,38 +2,40 @@
 
 **한국어** · [ENGLISH](README.en.md)
 
-한국어 문서에서 **감사 가능한(auditable) 온톨로지 스키마·계층을 결정적으로** 구축하는
-라이브러리 — 그리고 그 위에 어떤 관계 추출기든 통제된 방식으로 꽂을 수 있는 프레임워크.
+한국어 문서에서 **감사 가능한(auditable) 온톨로지 스키마·계층을 결정적으로** 구축하는 라이브러리 
+그리고 그 위에 어떤 관계 추출기든 통제된 방식으로 꽂을 수 있는 프레임워크.
 
-**무엇을 하나** — 문서 청크를 넣으면 개념(클래스), `subClassOf` 계층, 엔티티,
-관계 트리플을 방출한다. **스키마·계층·타이핑은 형태소 분석(Kiwi)·규칙·통계로만
-결정적으로 뽑는다(LLM 0회·모델 0회)** — 이것이 이 라이브러리의 본체다.
-축별 근거 수준은 같지 않다: **클래스 추출·provenance 는 실측 검증**됐고, **계층은
-(i) 접미공유 규칙(동종계층, X기관⊂기관 형 — 형태 규칙 수준) (ii) 직업 P106
-(직업클래스⊂인물, 전수 채점 검증) (iii) 정의문 채널(백과체 검증·뉴스체 실측 거짓률
-88.5%로 기본 off, v0.14~)** 의 3계보로 각각 다르다. **관계는 교체 가능한 provider 계층**이다: 조사 SVO 규칙(폴백),
-로컬 KLUE-RE 인코더(opt-in), 예산 통제된 LLM top-up(opt-in) 중 선택하거나
-`Extractor` Protocol 로 직접 주입한다.
+**무엇을 하나** — 문서 청크를 넣으면 개념(클래스), `subClassOf` 계층, 엔티티, 관계 트리플을 방출한다. 
+**스키마·계층·타이핑은 형태소 분석(Kiwi)·규칙·통계로만 결정적으로 뽑는다(LLM 0회·모델 0회)** 
 
-**왜 이 구조인가** — LLM 추출이 싸졌어도 남는 문제가 있기 때문이다:
+이것이 이 라이브러리의 본체다.
+
+축별 근거 수준은 같지 않다: **클래스 추출·provenance 는 실측 검증**됐고, 
+**계층은
+(i) 접미공유 규칙(동종계층, X기관⊂기관 형 — 형태 규칙 수준) 
+(ii) 직업 P106 (직업클래스⊂인물, 전수 채점 검증) 
+(iii) 정의문 채널(백과체 검증·뉴스체 실측 거짓률 88.5%로 기본 off, v0.14~)** 의 3계보로 각각 다르다. 
+
+**관계는 교체 가능한 provider 계층**이다: 
+
+조사 SVO 규칙(폴백), 로컬 KLUE-RE 인코더(opt-in), 예산 통제된 LLM top-up(opt-in) 중 선택하거나 `Extractor` Protocol 로 직접 주입한다.
+
+**왜 이 구조인가** — LLM 추출이 싸졌어도 남는 문제가 있기 때문이다
 - **결정성·재현성**: 같은 입력 → 같은 출력. 감사·롤백·A/B·회귀 검증이 가능하다.
-  (LLM 그래프 추출의 스키마·계층 비일관성은 업계 공통 미해결 문제다)
+  (LLM 그래프 추출의 스키마/계층 비일관성은 업계 공통 미해결 문제다)
 - **데이터 통제**: 전부 로컬 추론. 문서가 외부 API 로 나가지 않는다 — 에어갭 배포 가능.
-- **출처 추적(provenance)**: 모든 산출에 `source_chunks` 태깅 의무 — 트리플 단위로
-  "어느 청크에서 왔나"를 답할 수 있다. 규제 환경의 감사 요건이다.
+- **출처 추적(provenance)**: 모든 산출에 `source_chunks` 태깅 의무 — 트리플 단위로 "어느 청크에서 왔나"를 답할 수 있다. 규제 환경의 감사 요건이다.
 - 비용(문서당 ~$0)은 덤이지 본질이 아니다.
 
-**한계도 분명하다** — 개방도메인 관계 recall 은 LLM/신경 추출이 낫다. 그래서 관계는
-경쟁하지 않고 **provider 로 수용**하는 구조이며, 내장 채널의 실측 수치는 아래
-[품질 근거](#품질-근거--직접-재현할-수-있는-것만)에 그대로 공개한다. 스키마·계층이
-필요 없고 개방 관계 그래프만 필요하다면 이 라이브러리는 최선의 선택이 아니다.
+**한계도 분명하다** — 개방도메인 관계 recall 은 LLM/신경 추출이 낫다. 
+그래서 관계는 경쟁하지 않고 **provider 로 수용**하는 구조이며, 내장 채널의 실측 수치는 
+[품질 근거](#품질-근거--직접-재현할-수-있는-것만)에 그대로 공개한다. 
 
-**입력 계약과 파싱** — 이 라이브러리는 PDF/HWP 파싱을 하지 않는다(업계 표준 분업 —
-MS GraphRAG·LlamaIndex 등도 동일). 입력은 파싱·청킹이 끝난
-`{"파일명": [{"chunk_id", "chunk_text", "chunk_index"}]}` 이다. 권장 파서:
-[Docling](https://github.com/docling-project/docling)(MIT·로컬),
-HWP 는 Upstage Document Parse 류 전문 서비스. 파서 출력 → 위 청크 스키마로의
-변환은 각 파서의 마크다운/JSON 출력을 청크 단위로 접는 수십 줄이면 된다.
+스키마·계층이 필요 없고 개방 관계 그래프만 필요하다면 이 라이브러리는 최선의 선택이 아니다.
+
+**입력 계약과 파싱** — 이 라이브러리는 PDF/HWP 파싱을 하지 않는다
+(업계 표준 분업 — MS GraphRAG·LlamaIndex 등도 동일). 
+입력은 파싱·청킹이 끝난 `{"파일명": [{"chunk_id", "chunk_text", "chunk_index"}]}` 이다. 
 
 ```python
 from ontokit import DeterministicKoreanExtractor
@@ -57,21 +59,15 @@ concepts, entities, relations, data = await ext.extract(documents)
 | OWL 라벨 | `@ko` | `@en` (자동판정) | 혼재 출력 |
 
 ⚠️ 품질 검증 범위: 한국어=finreg 489 실측, 영어=구조 테스트만(코퍼스 실측 미완).
-관계추출: 규칙 조사SVO는 **가용성 폴백 전용**으로 지위 확정(앙상블 영구 기각, B3) +
-**KLUE-RE 인코더 채널(opt-in, holdout micro-F1 0.6274 — 외부 gold KLUE-RE)**.
+관계추출: 규칙 조사SVO는 **가용성 폴백 전용**으로 지위 확정(앙상블 영구 기각, B3) + **KLUE-RE 인코더 채널(opt-in, holdout micro-F1 0.6274 — 외부 gold KLUE-RE)**.
 인코더는 env 로 켜며 미설정 시 규칙 폴백 — 아래 [관계 인코더](#관계-인코더-v013--klue-re--sredfm-ko-증강-holdout-06274) 참조.
-⚠️ v0.5 대비 동작 변화: `auto_english=True` 기본이라 **라틴 약어가 섞인 한국어 코퍼스에
-영어 클래스가 새로 추가**된다(순수 한글 코퍼스는 출력 완전 동일 — finreg 489 실측).
+⚠️ v0.5 대비 동작 변화: `auto_english=True` 기본이라 **라틴 약어가 섞인 한국어 코퍼스에 영어 클래스가 새로 추가**된다(순수 한글 코퍼스는 출력 완전 동일 — finreg 489 실측).
 기존 동작 유지가 필요하면 `auto_english=False`.
-⚠️ v0.14 동작 변화: `enable_hearst` **기본 off** — 뉴스체 실그래프 실측에서 정의문
-채널 유래 의미 subClassOf 의 거짓률 88.5%(비정의문 서술문의 구조적 오발화). 백과·사전형
-코퍼스는 `enable_hearst=True` opt-in(백과체 외부 gold 89/100 검증). v0.12~v0.13 은
-기본 on 이었다. `enable_occupation=True`(직업 타이핑)는 기본 on 유지.
-⚠️ v0.15 동작 변화: `enable_qdt_gate` **기본 on** — 수량·날짜·시간(QT/DT/TI) 개체 중
-**관계에 참여하지 않는 것**의 인스턴스 승격을 차단한다. 근거: 개체 정밀도 파일럿
-(n=60, seed 20260810)에서 그래프 결함 38건 중 QT/DT/TI 유령("3분기"·"2023년" 류
-문서 앵커 없는 값 개체)이 17건, 차단 시 오살 0. 관계 목적어(설립일 등)로 참여하는
-개체는 보존된다. 구동작 복원: `enable_qdt_gate=False` 또는 `ONTOKIT_QDT_GATE=off`.
+⚠️ v0.14 동작 변화: `enable_hearst` **기본 off** — 뉴스체 실그래프 실측에서 정의문 채널 유래 의미 subClassOf 의 거짓률 88.5%(비정의문 서술문의 구조적 오발화). 
+백과사전형 코퍼스는 `enable_hearst=True` opt-in(백과체 외부 gold 89/100 검증). 
+v0.12~v0.13 은 기본 on 이었다. `enable_occupation=True`(직업 타이핑)는 기본 on 유지.
+⚠️ v0.15 동작 변화: `enable_qdt_gate` **기본 on** — 수량·날짜·시간(QT/DT/TI) 개체 중 **관계에 참여하지 않는 것**의 인스턴스 승격을 차단한다. 
+근거: 개체 정밀도 파일럿 (n=60, seed 20260810)에서 그래프 결함 38건 중 QT/DT/TI 유령("3분기"·"2023년" 류 문서 앵커 없는 값 개체)이 17건, 차단 시 오살 0. 관계 목적어(설립일 등)로 참여하는 개체는 보존된다. 구동작 복원: `enable_qdt_gate=False` 또는 `ONTOKIT_QDT_GATE=off`.
 
 ### 기본값 / env 스위치 한눈에
 
@@ -106,10 +102,8 @@ concepts, entities, relations, data = await ext.extract(documents)
 | `ONTOKIT_NER_EMIT_MISC` | `0`(off) | 영어 NER 의 MISC 라벨 방출(구동작 복원용) |
 | `ONTOKIT_NN_JOIN` | `0`(off) | 관계 추출 시 공백 경계 명사 결합 보존(P0-2). ⚠️ XPN/SN 분기에는 미적용 — 어절 형태에 따라 결합이 끊긴다 |
 
-**불변식**: 기본 경로는 **LLM 호출 0회 · transformers 로드 0회**. 모델을 쓰는 채널은
-전부 env opt-in 이고, 기본 on 인 신규 채널(직업 타이핑)도 패키지 동봉 어휘집만 읽는다
-(네트워크 0). 유일한 LLM 경로는 `relation_hybrid.HybridRelationExtractor` 로,
-`relation_extractor=` 로 **명시 주입**해야만 진입하며 예산 0 이면 순수 규칙과 동치다.
+**불변식**: 기본 경로는 **LLM 호출 0회 · transformers 로드 0회**. 모델을 쓰는 채널은 전부 env opt-in 이고, 기본 on 인 신규 채널(직업 타이핑)도 패키지 동봉 어휘집만 읽는다(네트워크 0). 
+유일한 LLM 경로는 `relation_hybrid.HybridRelationExtractor` 로, `relation_extractor=` 로 **명시 주입**해야만 진입하며 예산 0 이면 순수 규칙과 동치다.
 
 ## 철학
 - **코어 의존성 0** — 백엔드·모델(kiwipiepy/transformers/httpx)은 전부 extras.
@@ -164,9 +158,8 @@ f = ClassPromotionFilter(corpus_chunks=n_chunks)  # 미상(None)·소형(<5000)�
 keep, reason = f.decide(label, df=df, has_rel=..., has_kid=..., has_inst=...)
 ```
 승격 기준(termhood): 재사용(df≥2) 또는 구조 참여(관계·계층부모·인스턴스)시에만 클래스 승격.
-정크규칙은 통계+닫힌 문법 기능어만(도메인 블랙리스트 금지). mixed20k 실측: 444,817→70,671
-(-84.1%), 관계 트리플 100% 보존(사내 코퍼스 자체 실측). ⚠️고립 df1 유효개념도 지운다
-(의도된 비용, XGEN 배선은 사이드카 `<graph>__filtered`로 가역).
+정크규칙은 통계+닫힌 문법 기능어만(도메인 블랙리스트 금지). mixed20k 실측: 444,817→70,671(-84.1%), 관계 트리플 100% 보존(사내 코퍼스 자체 실측). 
+⚠️고립 df1 유효개념도 지운다 (의도된 비용, XGEN 배선은 사이드카 `<graph>__filtered`로 가역).
 
 ## 동시출현 약관계 (v0.10) — LLM-free 관계밀도 확충 (언어무관)
 ```python
@@ -176,20 +169,13 @@ col = CooccurrenceCollector(min_pair_df=3, lift_k=2.0, label_ok=make_korean_labe
 col.add_chunk(chunk_id, [(uri, label), ...])   # 청크 스트리밍
 edges = col.edges(exclude_pairs=svo_pairs)      # [(a, b, count)] — SVO 기연결 제외
 ```
-같은 청크 동시출현 엔티티쌍을 `coOccursWith`(함께언급) 약관계로 방출 — SVO(한국어 전용)가
-못 채우는 관계밀도·영어권을 결정적으로 확충. 선별은 통계만(pair df≥3 ∧ lift>2, 목록 0),
-라벨 자격은 형태·품사(달력·구두점·숫자토큰·라틴 미소·mixed-case 파편·조사 종결·단독
-의존명사·충돌 싱크). mixed20k 실측: 1.75%→10.5%, SVO 100% 보존, 표시 정크율 ~18%.
-⚠️coarse 관계(종류 없음), 소비측은 SVO 우선 + co-occ 폴백 슬롯. 잘림·병합 파편(`대구광역`)은
-형태 판별 밖(상류 NER). 위 수치는 사내 코퍼스 자체 실측(외부 gold 아님).
 
 ## 관계 인코더 (v0.13) — KLUE-RE + SREDFM-ko 증강, holdout 0.6274
 ```bash
 pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
 export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # 이 env가 on/off 스위치
 ```
-규칙 조사SVO(KLUE 연결력 0.8%)를 넘는 **로컬 RE 인코더** 채널. klue/roberta-small
-파인튜닝, **LLM API 호출 0회**(로컬 추론, NER 과 동일 계열).
+규칙 조사SVO(KLUE 연결력 0.8%)를 넘는 **로컬 RE 인코더** 채널. klue/roberta-small 파인튜닝, **LLM API 호출 0회**(로컬 추론, NER 과 동일 계열).
 
 **채택 이력** (외부 gold = KLUE-RE 공식 validation 7,765, micro-F1):
 
@@ -226,17 +212,12 @@ export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re_scale_large_fp16
 동일(인코더 무관) → 차이가 순수 인코더 성능임을 통제 실증. large CPU 추론 ~9초/청크(GPU 서빙
 시 해소). 상세: xgen-levelup `docs/ontokit/ontokit_small_vs_large_정량비교_mixed2k_2026_07_26.md`.
 
-**v14 라운드 결과(2026-07-22, 기각)** — colleagues 회복 시도(업웨이트+방문/회동
-하드네거 4-arm)는 colleagues F1 0.22→0.51 회복에도 **기각**됐다. 교란 제거
-측정(동결 dev·base 재현 Δ0.0001)에서 무관계 인명쌍(PER-PER no_relation) 리콜이
-전 arm −16~−25pt — 데이터 추가/업웨이트는 특정 술어만 살리지 못하고 **no_rel
-결정 경계를 전역 이동**시킨다(colleagues 무접촉 arm 도 동일 패턴). 후속
-rel3·v15(같은 날)에서 선택성 기제 2종도 기각 — 추론단 보정은 CONF_MIN 하
-실전 공허(구제 대상 전량 conf<0.5), 표적 카운터웨이트(합의 무관계 네거 195)는
-no_rel PER-PER 리콜을 역악화시키고 FP 질량을 인접 술어로 이동(풍선효과).
-**판례: small 용량에서 학습 데이터 조작으로 colleagues 선택 회복 불가 —
-남은 경로는 모델 크기 상향(위 '미소진 레버')의 용량 가설 검증뿐.** arm 비교 학습은 `V13_FROZEN_DEV`(dev 분할·스트림 순서 동결) 필수 —
-dev 가 하드셋 길이 종속이라 동결 없이는 best-epoch 교란으로 측정이 오염된다.
+**v14 라운드 결과(2026-07-22, 기각)** — colleagues 회복 시도(업웨이트+방문/회동 하드네거 4-arm)는 colleagues F1 0.22→0.51 회복에도 **기각**됐다. 
+
+교란 제거 측정(동결 dev·base 재현 Δ0.0001)에서 무관계 인명쌍(PER-PER no_relation) 리콜이 전 arm −16~−25pt — 데이터 추가/업웨이트는 특정 술어만 살리지 못하고 **no_rel 결정 경계를 전역 이동**시킨다(colleagues 무접촉 arm 도 동일 패턴). 
+후속 rel3·v15(같은 날)에서 선택성 기제 2종도 기각 — 추론단 보정은 CONF_MIN 하 실전 공허(구제 대상 전량 conf<0.5), 표적 카운터웨이트(합의 무관계 네거 195)는 no_rel PER-PER 리콜을 역악화시키고 FP 질량을 인접 술어로 이동(풍선효과).
+**판례: small 용량에서 학습 데이터 조작으로 colleagues 선택 회복 불가 — 남은 경로는 모델 크기 상향(위 '미소진 레버')의 용량 가설 검증뿐.** 
+arm 비교 학습은 `V13_FROZEN_DEV`(dev 분할·스트림 순서 동결) 필수 — dev 가 하드셋 길이 종속이라 동결 없이는 best-epoch 교란으로 측정이 오염된다.
 전 과정 원장: `eval_runs/relations/v14_round_closure.md`(빌드 리포 외부 작업장).
 
 현재 채택본은 `eval/relation/MODEL_LOCK.json` 이 단일 진실원(release_tag·sha256 고정).
@@ -245,8 +226,7 @@ dev 가 하드셋 길이 종속이라 동결 없이는 best-epoch 교란으로 �
 
 - **불변식**: env 미지정·extras 미설치·경로오류·NER부재 중 하나라도면 규칙 조사SVO 폴백.
   "설치·설정 안 하면 안 켜진다". NER(KoELECTRA)이 준 개체를 쌍으로 조합→관계 분류.
-- **규칙 채널 지위**(B3 확정): 규칙 조사SVO 는 **가용성 폴백 전용**. 인코더와의 앙상블은
-  **영구 기각** — holdout 실측에서 규칙 단독 보정 29건 vs 오염 144건으로 순가치 음수.
+- **규칙 채널 지위**(B3 확정): 규칙 조사SVO 는 **가용성 폴백 전용**. 인코더와의 앙상블은 **영구 기각** — holdout 실측에서 규칙 단독 보정 29건 vs 오염 144건으로 순가치 음수.
 - **모델 교체**: 특정 모델 미종속. ①env 변경 ②`eval/relation/train_encoder.py` 재학습
   ③`relation_extractor=` 주입 ④`.extract()` 래퍼 — `eval/relation/README.md` '모델 교체'.
 - 재현·평가: [`eval/relation/`](eval/relation/) — README 에 KLUE-RE 다운로드 명령,
@@ -254,12 +234,9 @@ dev 가 하드셋 길이 종속이라 동결 없이는 best-epoch 교란으로 �
   가중치는 GitHub Release 자산으로 배포(git 미커밋, sha256 은 `MODEL_LOCK.json`).
 
 ## 정의문 계층·타이핑 (v0.12~) — 이질계층 유도 (**기본 off, v0.14~**)
-접미공유가 **원리적으로 불가능한** 이질계층(강아지⊂동물, 신용공여⊂거래)을 정의문
-종결패턴(계사/genus/서술/속하는)으로 유도한다. **v0.14 부터 기본 off** — 뉴스체
-실그래프(ui_news100 538청크) 실측에서 이 채널 유래 의미 subClassOf 의 거짓률이
-**88.5%**(참7/거짓54, Wilson 하한 0.782)로, 정의문이 아닌 서술문("증권사는 …
-규제다" 류)의 구조적 오발화가 원인이다. 백과·사전형 코퍼스(위키·법령 정의조항)는
-opt-in 권장 — 그 문체에서는 외부 gold 검증 실적이 있다(아래 근거 수준).
+접미공유가 **원리적으로 불가능한** 이질계층(강아지⊂동물, 신용공여⊂거래)을 정의문 종결패턴(계사/genus/서술/속하는)으로 유도한다. 
+**v0.14 부터 기본 off** — 뉴스체 실그래프(ui_news100 538청크) 실측에서 이 채널 유래 의미 subClassOf 의 거짓률이 **88.5%**(참7/거짓54, Wilson 하한 0.782)로, 정의문이 아닌 서술문("증권사는 … 규제다" 류)의 구조적 오발화가 원인이다. 
+백과·사전형 코퍼스(위키·법령 정의조항)는 opt-in 권장 — 그 문체에서는 외부 gold 검증 실적이 있다(아래 근거 수준).
 
 ```python
 ext = DeterministicKoreanExtractor(enable_hearst=True)   # 백과체 opt-in (기본 off)
@@ -349,11 +326,9 @@ python eval_encoder.py holdout
 - **계층 89/100 과 정의문 615건·정밀도 87%** 는 개발 라운드의 **자체 심판·커밋 기록**이다.
   `eval/hierarchy/README.md` 의 결과 로그에는 R0 26/100 과 "R1 진행 중"만 남아 있고,
   89/100 을 뒷받침하는 재현 산출물은 **아직 랜딩되지 않았다**. 이 수치는 그 전제에서 읽을 것.
-- **정의문 계층의 문체 의존성(2026-08 실측)**: 위 검증은 전부 **백과·사전체**다. 뉴스체
-  실그래프(ui_news100)에서는 의미 유래 subClassOf 의 **88.5%가 거짓**(66건 전수 감정,
-  참7/거짓54/판단불가5)으로 실측돼 v0.14 부터 기본 off 로 전환했다. 접미공유 유래
-  계층(전체의 75%)은 X기관⊂기관 형 동종계층으로 형태 규칙 수준이며 의미 검증 대상이
-  아니다 — "계층이 검증됨"으로 읽지 말 것.
+- **정의문 계층의 문체 의존성(2026-08 실측)**: 위 검증은 전부 **백과·사전체**다.
+- 뉴스 실그래프(ui_news100)에서는 의미 유래 subClassOf 의 **88.5%가 거짓**(66건 전수 감정, 참7/거짓54/판단불가5)으로 실측돼 v0.14 부터 기본 off 로 전환했다.
+  접미공유 유래 계층(전체의 75%)은 X기관⊂기관 형 동종계층으로 형태 규칙 수준이며 의미 검증 대상이 아니다 — "계층이 검증됨"으로 읽지 말 것.
 - **v0.14 기본값의 계층 희소성(2026-08-10 e2e 실측, 뉴스체 한정)**: 기본 off 상태로
   ui_news100(뉴스체 538청크)을 풀빌드하면 `subClassOf` **43건**, 계층 참여 클래스
   **58/3,381(1.7%)** — 클래스의 98.3%가 계층 미참여다. 거짓 계층이 없는 대신 계층
@@ -361,8 +336,7 @@ python eval_encoder.py holdout
   접미공유 계층은 별개 실측 — finreg 489 는 subClassOf 1,710). 뉴스체에서 계층이
   필요하면 채널 실태를 이 수치로 판단하고 설계할 것.
 - **"NN/100 심판" 점수는 전부 자체 심판 루프**의 결과다(프로토콜은
-  `eval/*/JUDGE_PROTOCOL.md`). 외부 재채점이 아니다. 외부 gold 에 직접 앵커된 수치는
-  관계 holdout(0.6274)과 ER(0.776) 둘뿐이다.
+  `eval/*/JUDGE_PROTOCOL.md`). 외부 재채점이 아니다. 외부 gold 에 직접 앵커된 수치는 관계 holdout(0.6274)과 ER(0.776) 둘뿐이다.
 - **ER 은 미탑재**다. 임베딩이 동의어와 주제근접을 원리적으로 분리하지 못해(AUC 천장 ~0.81)
   게이트 미달 → 의도적으로 배선하지 않았다. 기본 dedup 은 형태소 기반이며,
   사전 병합은 `ONTOKIT_SYNONYM_DICT` opt-in 이다.
