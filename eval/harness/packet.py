@@ -31,7 +31,12 @@ import random
 # 심판 배포본에 나갈 수 있는 **유일한** 필드. 여기 없는 것은 나가지 않는다.
 ALLOWED = ("id", "label", "class", "contexts")
 
-# 배포본에 있으면 안 되는 문자열 — 직렬화 후 실검사한다
+# 배포본에 있으면 안 되는 문자열.
+#
+# ⚠️ **원문 컨텍스트는 검사 대상에서 뺀다.** 뉴스 원문에는 `조직을 신설한 데 이어` ·
+#    `처치실` 같은 어휘가 자연히 나온다(실측 8건). 컨텍스트까지 훑으면 오탐으로
+#    정당한 패킷 생성이 막힌다. 누설은 **구조 필드**(note·지침·필드명)로 일어나지
+#    원문 인용으로 일어나지 않는다 — 검사 범위를 거기로 좁힌다.
 FORBIDDEN = ("_set", "소멸", "신설", "before", "after", "처치", "verdict", "판정_설계자")
 
 
@@ -62,8 +67,12 @@ def build(entries, seed, note="", instructions=None):
     pack = {"seed": seed, "n": len(blind), "note": note,
             "판정지침": instructions or {}, "items": blind}
 
-    # ③ 직렬화 후 금지 문자열 실검사 — 주석·note 로도 새면 안 된다
-    dumped = json.dumps(pack, ensure_ascii=False)
+    # ③ 금지 문자열 실검사 — **컨텍스트를 제외한** 구조 부분만 본다.
+    #    note·지침·필드명·라벨로 새는 경로를 막는다. 원문 인용은 검사하지 않는다(위 주석).
+    probe = {k: v for k, v in pack.items() if k != "items"}
+    probe["items"] = [{k: v for k, v in it.items() if k != "contexts"}
+                      for it in pack["items"]]
+    dumped = json.dumps(probe, ensure_ascii=False)
     hit = [w for w in FORBIDDEN if w in dumped]
     if hit:
         raise LeakError(f"배포본에 정답 단서가 남아 있다: {hit}")

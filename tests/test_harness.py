@@ -97,3 +97,23 @@ def test_ruler_overrides_majority():
     assert r["판정"][3] == "판정불가"      # 참이 아니면 덮어쓰지 않는다
     assert r["덮어쓴수"] == 1
     assert r["자_덮어씀"][0]["label"] == "서울추모공원"
+
+
+def test_packet_context_not_scanned_for_forbidden_words():
+    """원문 컨텍스트는 금지어 검사에서 제외된다 — 오탐으로 정당한 패킷이 막히면 안 된다.
+
+    ⚠️ 실측: 뉴스 원문에 `조직을 신설한 데 이어` · `처치실` 이 자연히 나와
+       8건이 오탐으로 걸렸다. 누설은 구조 필드로 일어나지 원문 인용으로 일어나지 않는다.
+    """
+    e = [{"label": "LG유플러스", "class": "기관",
+          "contexts": ["데이터 분석 전담 조직을 신설한 데 이어 처치실을 두고 있다"],
+          "group": "G1"}]
+    pack, _ = build(e, seed=3, note="라벨 감정")      # 예외 없이 생성돼야 한다
+    assert pack["n"] == 1
+    assert "신설" in pack["items"][0]["contexts"][0]  # 원문은 그대로 보존
+
+    # 그러나 구조 필드로 새면 여전히 막힌다
+    with pytest.raises(LeakError):
+        build(e, seed=3, note="소멸 집합")
+    with pytest.raises(LeakError):
+        build([{**e[0], "label": "_set"}], seed=3)
