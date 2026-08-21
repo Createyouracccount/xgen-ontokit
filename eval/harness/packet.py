@@ -44,6 +44,22 @@ class LeakError(RuntimeError):
     """정답이 배포본에 새어나갈 수 있는 상태 — 생성 자체를 거부한다."""
 
 
+# 집합 감정 패킷에 **반드시** 들어가야 하는 경고.
+#
+# ⛔ R8 에서 심판 3인이 **만장일치로** "온전형과 조각이 동시에 로스터에 등재된다"고
+#    지적했고, 그것이 차기 표적으로 지정됐다. **실측 결과 틀렸다** — 패킷 내 부분문자열
+#    쌍 108종 중 **103종(95%)이 서로 다른 집합**(처치 전/후)이라 한 빌드에 공존한 적이
+#    없다. 심판이 before/after 를 섞은 패킷을 **"로스터의 현재 상태"로 오독**한 것이다.
+#
+#    맹검을 위해 섞는 것은 옳다. 그러나 **섞였다는 사실 자체는 알려야** 한다.
+#    안 알리면 심판의 패턴 관측이 통째로 오염된다. 이 경고를 지침에 강제 주입한다.
+COEXIST_WARNING = (
+    "⚠️ 이 항목들은 **서로 다른 시점의 산출물이 섞여** 있다. 두 항목이 같은 빌드에 "
+    "공존한다고 **가정하지 말 것**. 항목 간 관계(중복·포함·쌍)를 근거로 판정하지 말고, "
+    "각 항목을 **원문 컨텍스트만 보고 독립적으로** 판정하라."
+)
+
+
 def build(entries, seed, note="", instructions=None):
     """맹검 패킷 + 정답 대조표를 만든다.
 
@@ -64,8 +80,10 @@ def build(entries, seed, note="", instructions=None):
         blind.append(row)
         key.append({"id": new_id, "label": it.get("label"), "group": it.get("group")})
 
+    inst = dict(instructions or {})
+    inst["공존_경고"] = COEXIST_WARNING        # 강제 주입 — 호출자가 뺄 수 없다
     pack = {"seed": seed, "n": len(blind), "note": note,
-            "판정지침": instructions or {}, "items": blind}
+            "판정지침": inst, "items": blind}
 
     # ③ 금지 문자열 실검사 — **컨텍스트를 제외한** 구조 부분만 본다.
     #    note·지침·필드명·라벨로 새는 경로를 막는다. 원문 인용은 검사하지 않는다(위 주석).

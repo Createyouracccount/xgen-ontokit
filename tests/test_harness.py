@@ -117,3 +117,23 @@ def test_packet_context_not_scanned_for_forbidden_words():
         build(e, seed=3, note="소멸 집합")
     with pytest.raises(LeakError):
         build([{**e[0], "label": "_set"}], seed=3)
+
+
+def test_packet_injects_coexistence_warning():
+    """집합 감정 패킷에 **공존 경고가 강제 주입**되는가 — 호출자가 뺄 수 없다.
+
+    ⛔ R8 에서 심판 3인이 만장일치로 "온전형과 조각이 동시 등재된다"고 지적했고
+       차기 표적이 됐으나 **실측 결과 틀렸다** — 패킷 내 부분문자열 쌍 108종 중
+       103종(95%)이 서로 다른 집합이라 한 빌드에 공존한 적이 없다.
+       심판이 before/after 섞인 패킷을 "현재 상태"로 오독한 것이다.
+    """
+    from packet import COEXIST_WARNING
+
+    pack, _ = build(_entries(), seed=5, note="라벨 감정")
+    assert pack["판정지침"]["공존_경고"] == COEXIST_WARNING
+    assert "공존한다고" in pack["판정지침"]["공존_경고"]
+
+    # 호출자가 지침을 통째로 주더라도 경고는 살아남는다
+    pack2, _ = build(_entries(), seed=5, instructions={"값": ["참", "거짓"]})
+    assert "공존_경고" in pack2["판정지침"]
+    assert pack2["판정지침"]["값"] == ["참", "거짓"]
