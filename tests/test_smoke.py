@@ -2240,3 +2240,118 @@ def test_r11_offset_slice_wired_through_batch_path():
     finally:
         os.environ.pop("ONTOKIT_NER_OFFSET_SLICE", None)
         importlib.reload(m)
+
+
+# ── R13 P279 개념 게이트 ─────────────────────────────────────────────────────
+def _cg():
+    import importlib
+    import ontokit.filter.concept_gate as m
+    importlib.reload(m)
+    return m
+
+
+def test_r13_default_off():
+    """기본 OFF. 켜지 않은 빌드의 산출이 바뀌면 결정성 봉인이 깨진다."""
+    import os
+    os.environ.pop("ONTOKIT_CONCEPT_GATE", None)
+    assert _cg().ENABLED is False
+
+
+def test_r13_empty_snapshot_rejects_nothing_and_warns(tmp_path):
+    """스냅샷이 비면 거부 0 인데, 그건 '개념이 없다'가 아니라 '조회를 못 했다'다.
+
+    무증상 0 의심 원칙 — 경고 없이 0 을 내면 게이트가 조용히 무력화된다.
+    """
+    m = _cg()
+    ents = {"d": [{"entity": "교수", "class": "문화·제도"}]}
+    st = m.apply(ents, _kiwi_or_skip(), snapshot_path=str(tmp_path / "none.json"))
+    assert st["거부"] == 0 and "경고" in st and st["스냅샷"] == 0
+    assert len(ents["d"]) == 1
+
+
+def _kiwi_or_skip():
+    import pytest
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        pytest.skip("kiwipiepy 없음")
+    return Kiwi()
+
+
+def _snap(tmp_path, data):
+    import json
+    p = tmp_path / "snap.json"
+    json.dump(data, open(p, "w"), ensure_ascii=False)
+    return str(p)
+
+
+def test_r13_rejects_concept_keeps_entity(tmp_path):
+    """P279>0 은 거부, P279=0 은 통과."""
+    m = _cg()
+    sp = _snap(tmp_path, {"교수": {"p279": 3, "taxon": 0},
+                          "골프채": {"p279": 0, "taxon": 0}})
+    ents = {"d": [{"entity": "교수", "class": "문화·제도"},
+                  {"entity": "골프채", "class": "인공물"}]}
+    st = m.apply(ents, _kiwi_or_skip(), snapshot_path=sp)
+    assert st["거부"] == 1 and st["통과"] == 1, st
+    assert [e["entity"] for e in ents["d"]] == ["골프채"]
+
+
+def test_r13_taxon_rejected_even_with_zero_p279(tmp_path):
+    """Wikidata 는 생물 분류군을 P31=Q16521 로만 모델링해 P279=0 이다.
+
+    0822 실측: `가리비`·`배추`·`갑오징어` 가 이 경로로 게이트를 빠져나갔다.
+    """
+    m = _cg()
+    sp = _snap(tmp_path, {"배추": {"p279": 0, "taxon": 1}})
+    ents = {"d": [{"entity": "배추", "class": "동물"}]}
+    st = m.apply(ents, _kiwi_or_skip(), snapshot_path=sp)
+    assert st["거부"] == 1 and ents["d"] == []
+
+
+def test_r13_undecidable_passes_explicitly(tmp_path):
+    """라벨 없음 = 판정불가 → **명시적 통과**. 회색지대 기본값 금지."""
+    m = _cg()
+    sp = _snap(tmp_path, {"관상": {"p279": None, "taxon": None}})
+    ents = {"d": [{"entity": "관상", "class": "용어"},      # 스냅샷에 있으나 라벨 부재
+                  {"entity": "거미", "class": "동물"}]}     # 스냅샷에 아예 없음
+    st = m.apply(ents, _kiwi_or_skip(), snapshot_path=sp)
+    assert st["판정불가"] == 2 and st["거부"] == 0 and len(ents["d"]) == 2, st
+
+
+def test_r13_compound_and_proper_noun_untouched(tmp_path):
+    """단일 NNG 만 대상. 복합·고유명사는 스냅샷에 있어도 건드리지 않는다 — 오살 축소 장치."""
+    m = _cg()
+    sp = _snap(tmp_path, {"삼성전자": {"p279": 5, "taxon": 0},
+                          "코로나19": {"p279": 2, "taxon": 0}})
+    ents = {"d": [{"entity": "삼성전자", "class": "기관"},
+                  {"entity": "코로나19", "class": "용어"}]}
+    st = m.apply(ents, _kiwi_or_skip(), snapshot_path=sp)
+    assert st["거부"] == 0 and st["대상아님"] == 2 and len(ents["d"]) == 2
+
+
+def test_r13_class_scope_limits_application(tmp_path, monkeypatch):
+    """CLASS_SCOPE 로 적용 클래스를 좁힐 수 있어야 한다 — 0822 오살 11건의 처방."""
+    import importlib, os
+    os.environ["ONTOKIT_CONCEPT_GATE_CLASSES"] = "문화·제도,동물"
+    try:
+        import ontokit.filter.concept_gate as m
+        importlib.reload(m)
+        sp = _snap(tmp_path, {"교수": {"p279": 3, "taxon": 0},
+                              "경제": {"p279": 4, "taxon": 0}})
+        ents = {"d": [{"entity": "교수", "class": "문화·제도"},
+                      {"entity": "경제", "class": "지역"}]}   # 범위 밖 — 개념이어도 통과
+        st = m.apply(ents, _kiwi_or_skip(), snapshot_path=sp)
+        assert st["거부"] == 1 and [e["entity"] for e in ents["d"]] == ["경제"], st
+    finally:
+        os.environ.pop("ONTOKIT_CONCEPT_GATE_CLASSES", None)
+        importlib.reload(m)
+
+
+def test_r13_p31_is_never_used_for_instance_decision():
+    """C10 — `P31 있음 ⇒ instance` 는 무효(구조 오염 40~100%). 소스에 그 경로가 없어야 한다."""
+    import inspect
+    import ontokit.filter.concept_gate as m
+    src = inspect.getsource(m.is_concept)
+    assert "p31" not in src.lower() or "taxon" in src.lower()
+    assert "Q16521" in inspect.getsource(m)      # taxon 예외만 P31 을 쓴다

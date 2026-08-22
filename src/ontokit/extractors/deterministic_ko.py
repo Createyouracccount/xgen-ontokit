@@ -391,6 +391,19 @@ class DeterministicKoreanExtractor:
             from ontokit.ner.suffix_fragment import drop_suffix_fragments
             drop_suffix_fragments(all_entities, "\n".join(t for _, t, _ in ko_ner_buf))
 
+        # ②''' P279 개념 게이트 (R13) — 보통명사를 개체 인스턴스에서 제외.
+        #   0822 **검색 계층** 실측이 고른 처치다: 실제 온톨로지 검색이 상위에 노출한
+        #   결함 35건이 **보통명사 100% · 절단 0%** 였다(추출 분해는 절단 32.1%였는데
+        #   부호가 반대다 — 절단은 빈도가 낮아 랭킹에서 밀린다). 판별력 +60.3pp.
+        #   위치: 접미 조각 게이트 **직후**, 타이핑 **전** — 조각 제거 뒤라야 라벨이
+        #   온전하고, 타이핑 전이라야 개념이 클래스 계층으로 새지 않는다.
+        #   빌드 시점에 네트워크를 타지 않는다(동결 스냅샷). 기본 OFF.
+        #   공시 `eval_runs/bench/demo_roster/r13_predeclare.md`.
+        if all_entities:
+            from ontokit.filter import concept_gate as _cg
+            if _cg.ENABLED:
+                _cg.apply(all_entities, self.nouns.kiwi)
+
         # ②" 정의문 인스턴스 타이핑 (ABox↔TBox 브리지) — 정의문 주어가 NER
         #   개체면 subClassOf 대신 rdf:type. 본질 진단(0714): 계층 클래스 13,441
         #   중 인스턴스 도달 0(완전 분리) → GraphRAG 계층 leg 영구 공회전 수복.
