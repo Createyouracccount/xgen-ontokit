@@ -98,6 +98,14 @@ GOOGLE_KG_BAR = 99.0         # KV 가 미달로 탈락한 요구선
 KV_RAW = 30.0                # KV 원시 추출 정밀도
 KLUE_BOUNDARY_TAX = 6.45     # 6타입에서도 Entity-F1 vs Char-F1 격차
 
+# ── 검색 계층 실측 (0822) — 프록시(추출)와 최종지표(검색)의 버킷 부호가 다르다 ──
+# 판례 35: 프록시를 목표로 삼기 전에 최종지표에서 그 축이 보이는지 먼저 확인하라.
+#   추출 계층: 절단 32.1% · 보통명사 62.3%
+#   검색 계층: 절단  0.0% · 보통명사 100%   (노출 155노드 중 결함 35 = 22.58%)
+# 절단 라벨은 빈도가 낮아 랭킹에서 밀리고, 보통명사는 빈도가 높아 항상 상위다.
+SEARCH_LAYER = dict(n_nodes=155, defect=35, defect_pct=22.58,
+                    bucket={"단일보통명사": 35, "조사꼬리(절단)": 0})
+
 # ── 우리 기준선 (0822 실측). 라운드마다 갱신하되 출처를 남긴다 ──────────────────
 OUR = dict(types=1100, precision=62.14, recall=63.51,
            bucket={"spurious": 62.3, "partial": 32.1, "incorrect_type": 3.8, "merge": 1.9},
@@ -197,7 +205,10 @@ def main() -> int:
         print(f"우리 {OUR['types']}종 {OUR['precision']}% (보간 기대 {interp(OUR['types']):.2f}%)")
         print(f"인간 합의 상한 κ {HUMAN_KAPPA}% · Google KG 바 {GOOGLE_KG_BAR}% · KV 원시 {KV_RAW}%")
         print(f"KLUE 경계세(6타입에서도) {KLUE_BOUNDARY_TAX}pp")
-        print(f"\n오류 버킷: " + " · ".join(f"{k} {v}%" for k, v in OUR["bucket"].items()))
+        print(f"\n오류 버킷(추출): " + " · ".join(f"{k} {v}%" for k, v in OUR["bucket"].items()))
+        print(f"오류 버킷(검색): " + " · ".join(f"{k} {v}" for k, v in SEARCH_LAYER["bucket"].items())
+              + f"  — 노출 {SEARCH_LAYER['n_nodes']}노드 중 결함 {SEARCH_LAYER['defect_pct']}%")
+        print("  ⚠️ 판례 35 — 절단 축은 검색에 노출되지 않는다. 처치를 고를 때 검색 버킷을 보라.")
         print(f"신뢰도 곡선(무효 실증): " + " · ".join(f"{t}→{p}%" for t, p in OUR["conf_curve"]))
         print(f"골드 n={OUR['gold_n']} MDE {OUR['gold_mde_pp']}pp 검정력 {OUR['gold_power']}%")
         print(f"\n닫힌 경로 {len(CLOSED)}개: " + ", ".join(f"{c}={d['name']}" for c, d in CLOSED.items()))

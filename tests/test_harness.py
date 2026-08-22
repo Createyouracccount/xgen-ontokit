@@ -436,3 +436,17 @@ def test_r12_flags_high_undecided_rate(tmp_path):
     cols = {j: {i: ("판정불가" if i < 3 else "거짓") for i in range(10)} for j in "ABC"}
     kp, vp = _write(tmp_path, rows, cols)
     assert g.score(kp, vp)["판정불가_경보"] is True
+
+
+def test_external_gate_carries_search_layer_buckets():
+    """판례 35 — 검색 계층 버킷이 게이트에 실려야 한다.
+
+    추출(절단 32.1%)과 검색(절단 0%)은 부호가 다르다. 검색 버킷이 없으면
+    게이트는 프록시만 보고 처치를 통과시킨다.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
+    import external_gate as g
+    assert g.SEARCH_LAYER["bucket"]["조사꼬리(절단)"] == 0
+    assert g.SEARCH_LAYER["bucket"]["단일보통명사"] == 35
+    assert g.OUR["bucket"]["partial"] > 0          # 추출에선 존재
