@@ -1,8 +1,34 @@
-# ontokit 개선 로드맵 (2026-07-10, 상태갱신 07-20 / v0.13.1)
+# ontokit 개선 로드맵 (2026-07-10, 상태갱신 **08-24 / v0.15.0**)
+
+> 🔴 **0824 정정 — 이 문서는 v0.13.1 기준으로 2개 버전 뒤처져 있었다.**
+> 아래 0720 블록이 `enable_hearst=True` **기본 on** 이라고 적고 있었으나 **v0.14 에서 off 로
+> 바뀌었다**(정의문 유래 의미 subClassOf 거짓률 88.5% 실측). v0.15 의 `enable_qdt_gate` 는
+> 상태표에 아예 없었다. **로드맵을 읽고 라운드를 설계하면 오도된다.**
+> → 표류를 다시 겪지 않도록 아래 **기본값 계약** 블록을 두고 `tests/test_roadmap_defaults.py`
+> 가 코드와 대조한다. 값이 갈리면 테스트가 깨진다(판례 27-iii: 집행되지 않는 규범은 안 지켜진다).
+
+## 기본값 계약 (코드가 정본 — 테스트가 대조한다)
+
+<!-- ROADMAP_DEFAULTS_BEGIN — `DeterministicKoreanExtractor.__init__` 의 bool 기본값. 손으로 고치지 말고 코드를 고쳐라 -->
+```
+enable_relations = True
+auto_english = True
+enable_hearst = False
+enable_occupation = True
+enable_qdt_gate = True
+```
+<!-- ROADMAP_DEFAULTS_END -->
+
+- `enable_hearst=False` (v0.14~) — 뉴스체에서 정의문 채널 유래 의미 subClassOf 의 **88.5% 가 거짓**.
+  백과체에서는 유효하므로 폐기가 아니라 **opt-in**.
+- `enable_qdt_gate=True` (v0.15~) — 수량·날짜·시간(QT/DT/TI) 중 **관계 미참여** 개체의
+  인스턴스 승격 차단.
+
 
 > **0720 상태갱신 — Tier 1 두 항목 모두 종결.**
 > - **Tier 1-1 Hearst 정의문 배선 → ✅ 완료.** `definitional_pairs()` 가
->   `deterministic_ko.py:305` 에서 호출되고 `enable_hearst=True` 가 **기본 on**.
+>   `deterministic_ko.py` 에서 호출된다. ~~`enable_hearst=True` 가 **기본 on**~~
+>   → **0824 정정: v0.14 부터 기본 off.** 위 기본값 계약 참조.
 >   `assign_definitional_types()` 로 ABox↔TBox 브리지까지 추가(계층 도달률 0% 수복).
 > - **Tier 1-2 co-occurrence → ✅ 완료(v0.10).** `cooccurrence.py` 로 구현,
 >   `coOccursWith` 약관계 방출. 단 **소비측 배선 방식** — extractor 내부가 아니라
@@ -26,7 +52,7 @@
 |---|---|---|
 | 클래스 추출 | Kiwi 복합명사(`kiwi_nouns`) | ✅ 기본 on |
 | 계층(subClassOf) | 접미공유(`suffix_share`) | ✅ 기본 on |
-| 계층 — 이질 상위어 | 정의문(`hearst_ko`) + ABox↔TBox 브리지 | ✅ **기본 on (0712~, 신규)** |
+| 계층 — 이질 상위어 | 정의문(`hearst_ko`) + ABox↔TBox 브리지 | ⚙️ **기본 off (v0.14~)** — 뉴스체 거짓률 88.5% |
 | 엔티티(인스턴스) | KoELECTRA/EnglishNER | ✅ 주입 시 |
 | 인스턴스 타이핑 | 직업 P106 어휘집(`instance_typing`) | ✅ **기본 on (0719, 신규)** |
 | 관계(objectProperty) | 조사 기반 SVO(`relation_ko`) | ✅ 기본 on — **가용성 폴백 전용**으로 지위 확정 |
@@ -38,6 +64,8 @@
 | dedup — 사전 동의어 | 우리말샘(`synonym_dict`) | ⚙️ env opt-in |
 | 인용(`:cites`) | 정규식(`citations`) | ✅ **(0712, 신규)** |
 | OWL 생성 | 결정적(`owl/generator`) | ✅ 배선 |
+| QDT 게이트 | 관계 미참여 수량·날짜·시간 승격 차단 | ✅ **기본 on (v0.15~, 0824 추가 기재)** |
+| 개념 게이트(P279) | Wikidata P279 동결 스냅샷 | ⚙️ **env opt-in, 기본 off** — R14 실측 −1.05pp **보류** |
 
 관계 노이즈 정제(띄어쓰기 경계)까지 완료 — 위키 30문서 노이즈 20%→2%.
 **LLM-free 불변식 유지**: 기본 경로는 LLM 0회·transformers 로드 0회. 모델 채널은 전부
@@ -138,7 +166,9 @@ Tier 1 종결 후 재산정. **전부 LLM 없이 가능한 것부터** 정렬했
 현재 채택본은 **klue/roberta-small** 계열 증강본(holdout 0.6274). KLUE 공식 baseline 은
 small 0.6085 / base 0.6666 / **large 0.6959** 다.
 - → **base·large 로 올리는 것만으로 +3~7pp** 가 남아 있다. 증강(+3.5pp)은 이미 소진했고,
-  크기 상향은 **미소진 레버**다. 비용은 추론 시간·메모리(로컬 CPU 추론 전제 재검토 필요).
+  크기 상향은 ~~**미소진 레버**~~ 였다. 비용은 추론 시간·메모리(로컬 CPU 추론 전제 재검토 필요).
+- 🔴 **0824 정정 — 이 레버는 이미 탐색·파킹됐다(0724 스케일링 라운드).** large 는 상한 초과로
+  **조건부 파킹(C3)** 됐고 차기 방향은 증류로 넘어갔다. 이 절을 근거로 라운드를 열지 마라.
 - 앙상블은 **영구 기각**(B3) — 규칙 채널과의 앙상블은 순가치 음수로 실측됐다.
 
 ### 3순위 — 이질 상위어 recall (우리말샘 상하위어 주입)
@@ -147,6 +177,15 @@ small 0.6085 / base 0.6666 / **large 0.6959** 다.
 - **우리말샘(CC BY-SA, 110만 표제어)의 상위어/하위어 관계 주입**. 현재 우리말샘은
   동의어 채널로만 쓰이고(`ONTOKIT_SYNONYM_DICT`, opt-in), **상하위어는 미활용**이다.
 - 선결: 실제 XML 덤프에 상하위어 필드 커버리지가 얼마나 되는지 로컬 확인.
+- 🔴 **0824 실측 — 선결이 자산 부재로 막혀 있다.** 원본 XML 덤프(`data/urimalsam/`)가
+  **디스크에 없다.** 남은 것은 파생 산출 `urimalsam_syn.txt`(273,761행) 뿐이고 그것은
+  **비슷한말 관계만** 담는다(`er_urimalsam.py` 가 `relation_info[type=비슷한말]` 만 파싱).
+  상하위어를 쓰려면 **덤프 재취득 + 파서 신설**이 선행이다.
+- ⚠️ **0824 부수 실측 — "사전 등재 ⇒ 총칭" 방향은 무효다.** R14 검색 노드 157건에
+  비슷한말 스냅샷 등재 여부를 대조하니 정상 노드 중 등재가 17건이었고 그 정체가
+  `독일`·`서울`·`중국`·`한국`·`애플`·`카카오`·`강남구`·`국토교통부`·`기획재정부` 등
+  **실개체**였다. 우리말샘은 지명·국명·기관명을 표제어로 담는다.
+  → P31 교훈(비대칭만 유효)의 재현. 덤프를 구해도 이 방향은 쓸 수 없다.
 - KorLex/KAIST KWN 은 0720 재확인에도 **DNS 실패 지속** → 우리말샘이 유일한 살아있는 대체재.
 
 ### 4순위 — 의존파싱 기반 관계 (조사 SVO 천장 돌파)

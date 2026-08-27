@@ -137,15 +137,60 @@ def interp(types: int) -> float:
 
 
 def check_path(text: str) -> list[str]:
-    """처치 설명이 닫힌 경로에 걸리는지. 걸린 항목 코드 목록 반환."""
+    """처치 설명이 닫힌 경로에 걸리는지. 걸린 항목 코드 목록 반환.
+
+    ⚠️ 이건 **키워드 부분일치**다. 히트는 강한 신호지만 **미히트는 무해의 증거가 아니다.**
+    실측(0824): 같은 처치를 "보통명사 필터"로 쓰면 BLOCK, "총칭/개체 판별"로 쓰면 PASS 였다.
+    표현만 바꿔 우회된다. 그래서 판정은 `--layer` 선언(기제)과 **함께** 내린다.
+    """
     low = text.lower()
     return [c for c, d in CLOSED.items()
             if any(k.lower() in low for k in d["kw"])]
 
 
+# ── 하드코딩 층위 (정본: RESEARCH_2026_08_22_외부선행조사.md §1) ──
+# 처치를 **표현이 아니라 기제**로 판정하기 위한 축. 층위 0 은 표현과 무관하게 차단한다.
+LAYERS = {
+    0: dict(name="어휘 목록", ex="교수·박사·어머니·와인…", n="수백~∞",
+            overfit=True, growth="무한"),
+    1: dict(name="문자·기호", ex="word_boundary.TRIM 20자", n="유한",
+            overfit=False, growth="유니코드가 닫음"),
+    2: dict(name="형태소 태그", ex="단일 NNG 거부", n="0",
+            overfit=False, growth="없음"),
+    3: dict(name="클래스 정책", ex="14종 × 정책", n="≤14",
+            overfit=False, growth="모델 taxonomy 가 닫음"),
+    4: dict(name="코퍼스 통계", ex="분기 엔트로피", n="0",
+            overfit=False, growth="없음"),
+    5: dict(name="외부 사전·KB", ex="우리말샘·Wikidata", n="큼, 내 것 아님",
+            overfit=False, growth="외부가 관리"),
+}
+
+
+def check_layer(layer: int, extends: bool) -> tuple[bool, str]:
+    """기제 기반 판정. (차단여부, 사유).
+
+    `extends=True` = **우리가 항목을 추가·유지보수한다**. 외부 사전을 쓴다고 선언해도
+    항목을 우리가 늘리면 그 순간 층위 0 이다 — 0710 Hearst `_STOP_HYPER` 가 그렇게 죽었고,
+    `ruler.FACILITY_SUFFIX` 에 `센터` 를 넣었다 뺀 것이 그 사이클 1회차였다.
+    """
+    if layer not in LAYERS:
+        return True, f"층위 {layer} 는 정의에 없다 (0~5)"
+    if layer == 0:
+        return True, ("층위 0(어휘 목록)은 표현과 무관하게 차단한다 — 항목이 무한 증식하고 "
+                      "평가셋에 과적합한다. semantic drift(1999~)가 같은 사이클이다.")
+    if extends:
+        return True, (f"층위 {layer} 로 선언했으나 **우리가 항목을 추가한다** → 실질 층위 0. "
+                      "외부 자산은 **동결해서 조회만** 할 때에만 층위 5 다.")
+    return False, f"층위 {layer}({LAYERS[layer]['name']}) — 증식 통제: {LAYERS[layer]['growth']}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="외부 좌표 게이트 (0822)")
     ap.add_argument("--check-path", metavar="TEXT", help="처치 설명 — 닫힌 경로 대조")
+    ap.add_argument("--layer", type=int, choices=range(6), metavar="0..5",
+                    help="처치의 하드코딩 층위(정본 §1). --check-path 판정에 **필수**")
+    ap.add_argument("--extends", action="store_true",
+                    help="우리가 항목을 추가·유지보수한다 → 선언 층위와 무관하게 층위 0 취급")
     ap.add_argument("--target", type=float, help="목표 정밀도 (0~1 또는 0~100)")
     ap.add_argument("--types", type=int, default=OUR["types"], help="클래스 수")
     ap.add_argument("--gold-n", type=int, help="이 라운드 골드 표본 수")
@@ -156,14 +201,31 @@ def main() -> int:
     if a.check_path:
         hits = check_path(a.check_path)
         print(f"\n=== G0 처치 제안 게이트 ===\n입력: {a.check_path}")
-        if hits:
+        for c in hits:
             blocked = True
-            for c in hits:
-                d = CLOSED[c]
-                print(f"\n⛔ BLOCK [{c}] {d['name']}\n   근거: {d['why']}\n   출처: {d['src']}")
+            d = CLOSED[c]
+            print(f"\n⛔ BLOCK [{c}] {d['name']}\n   근거: {d['why']}\n   출처: {d['src']}")
+        if hits:
             print("\n재론하려면 위 근거를 무효화하는 신규 실측을 제출하고 ledger 에 기록하라.")
+
+        # 기제 판정 — 키워드 미히트는 무해의 증거가 아니다(0824 실측: 표현만 바꿔 우회됨).
+        if a.layer is None:
+            blocked = True
+            print("\n⚠️ 판정불가 — `--layer 0..5` 를 선언하지 않았다.")
+            print("   키워드 미히트는 통과가 아니다. 같은 처치가 표현에 따라 갈린 실측이 있다"
+                  "(0824: '보통명사 필터'=BLOCK / '총칭·개체 판별'=PASS).")
+            print("   회색지대 기본값 금지 — 판정 불가는 명시적 통과 또는 명시적 차단이어야 한다.")
+            for k, v in sorted(LAYERS.items()):
+                print(f"     {k} {v['name']:<12} 예: {v['ex']:<26} 증식: {v['growth']}")
         else:
-            print("✅ PASS — 닫힌 경로 미해당. (통과가 곧 타당성은 아니다)")
+            bad, why = check_layer(a.layer, a.extends)
+            if bad:
+                blocked = True
+                print(f"\n⛔ BLOCK [층위] {why}")
+            else:
+                print(f"\n✅ 층위 통과 — {why}")
+        if not blocked:
+            print("\n✅ PASS — 닫힌 경로 미해당 + 기제 선언 통과. (통과가 곧 타당성은 아니다)")
 
     if a.target is not None:
         t = a.target * 100 if a.target <= 1.0 else a.target
