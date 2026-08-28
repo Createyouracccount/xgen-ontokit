@@ -11,7 +11,10 @@
 프로토콜:  eval_runs/bench/VERIFY_PROTOCOL.md
 """
 from __future__ import annotations
-import argparse, sys
+import argparse
+import re
+import sys
+from pathlib import Path
 
 # ── 닫힌 경로 (RESEARCH §5). 키워드가 걸리면 BLOCK. ────────────────────────────
 CLOSED = {
@@ -148,40 +151,50 @@ def check_path(text: str) -> list[str]:
             if any(k.lower() in low for k in d["kw"])]
 
 
-# ── 하드코딩 층위 (정본: RESEARCH_2026_08_22_외부선행조사.md §1) ──
-# 처치를 **표현이 아니라 기제**로 판정하기 위한 축. 층위 0 은 표현과 무관하게 차단한다.
-LAYERS = {
-    0: dict(name="어휘 목록", ex="교수·박사·어머니·와인…", n="수백~∞",
-            overfit=True, growth="무한"),
-    1: dict(name="문자·기호", ex="word_boundary.TRIM 20자", n="유한",
-            overfit=False, growth="유니코드가 닫음"),
-    2: dict(name="형태소 태그", ex="단일 NNG 거부", n="0",
-            overfit=False, growth="없음"),
-    3: dict(name="클래스 정책", ex="14종 × 정책", n="≤14",
-            overfit=False, growth="모델 taxonomy 가 닫음"),
-    4: dict(name="코퍼스 통계", ex="분기 엔트로피", n="0",
-            overfit=False, growth="없음"),
-    5: dict(name="외부 사전·KB", ex="우리말샘·Wikidata", n="큼, 내 것 아님",
-            overfit=False, growth="외부가 관리"),
-}
+# ── 하드코딩 층위 — **정본을 베끼지 않는다** ──
+#
+# 0824 자기적발: 여기에 정본(RESEARCH_2026_08_22_외부선행조사.md §1)의 표를 dict 로
+# 복사해 뒀었다. 그건 오늘 세 번 고친 결함과 **같은 유형**이다 —
+# graphstore 추출본이 정본보다 낡았고, 로드맵이 코드보다 낡았다. 사본은 조용히 어긋난다.
+# 게다가 복사한 6필드 중 `n`·`overfit` 은 **한 번도 읽히지 않았다**(죽은 사본).
+#
+# 집행에 필요한 것은 표가 아니라 **두 규칙**뿐이다:
+#   ① 층위 0(어휘 목록)은 표현과 무관하게 차단
+#   ② 외부 자산이라 선언해도 **우리가 항목을 추가하면** 실질 층위 0
+# 설명문은 정본에서 **읽는다**. 못 읽으면 못 읽었다고 말한다(추측한 사본을 쓰지 않는다).
+
+LAYER_MIN, LAYER_MAX = 0, 5
+CANON = (Path(__file__).resolve().parents[2]
+         / "eval_runs" / "bench" / "RESEARCH_2026_08_22_외부선행조사.md")
+_LAYER_ROW = re.compile(r"^\|\s*\**(\d)\s+([^|*]+?)\**\s*\|", re.M)
+
+
+def canon_layers() -> dict[int, str]:
+    """정본 §1 표에서 층위 이름을 읽는다. 못 읽으면 빈 dict — 사본으로 때우지 않는다."""
+    try:
+        return {int(m.group(1)): m.group(2).strip()
+                for m in _LAYER_ROW.finditer(CANON.read_text(encoding="utf-8"))}
+    except OSError:
+        return {}
 
 
 def check_layer(layer: int, extends: bool) -> tuple[bool, str]:
-    """기제 기반 판정. (차단여부, 사유).
+    """기제 기반 판정. (차단여부, 사유). **정본 표 없이도 판정한다.**
 
-    `extends=True` = **우리가 항목을 추가·유지보수한다**. 외부 사전을 쓴다고 선언해도
+    `extends=True` = 우리가 항목을 추가·유지보수한다. 외부 사전을 쓴다고 선언해도
     항목을 우리가 늘리면 그 순간 층위 0 이다 — 0710 Hearst `_STOP_HYPER` 가 그렇게 죽었고,
     `ruler.FACILITY_SUFFIX` 에 `센터` 를 넣었다 뺀 것이 그 사이클 1회차였다.
     """
-    if layer not in LAYERS:
-        return True, f"층위 {layer} 는 정의에 없다 (0~5)"
+    if not LAYER_MIN <= layer <= LAYER_MAX:
+        return True, f"층위 {layer} 는 정의 범위 밖이다 ({LAYER_MIN}~{LAYER_MAX})"
     if layer == 0:
         return True, ("층위 0(어휘 목록)은 표현과 무관하게 차단한다 — 항목이 무한 증식하고 "
                       "평가셋에 과적합한다. semantic drift(1999~)가 같은 사이클이다.")
     if extends:
         return True, (f"층위 {layer} 로 선언했으나 **우리가 항목을 추가한다** → 실질 층위 0. "
                       "외부 자산은 **동결해서 조회만** 할 때에만 층위 5 다.")
-    return False, f"층위 {layer}({LAYERS[layer]['name']}) — 증식 통제: {LAYERS[layer]['growth']}"
+    name = canon_layers().get(layer)
+    return False, f"층위 {layer}" + (f"({name})" if name else " — 정본 표 조회 불가")
 
 
 def main() -> int:
@@ -215,8 +228,13 @@ def main() -> int:
             print("   키워드 미히트는 통과가 아니다. 같은 처치가 표현에 따라 갈린 실측이 있다"
                   "(0824: '보통명사 필터'=BLOCK / '총칭·개체 판별'=PASS).")
             print("   회색지대 기본값 금지 — 판정 불가는 명시적 통과 또는 명시적 차단이어야 한다.")
-            for k, v in sorted(LAYERS.items()):
-                print(f"     {k} {v['name']:<12} 예: {v['ex']:<26} 증식: {v['growth']}")
+            names = canon_layers()
+            if names:
+                for k in range(LAYER_MIN, LAYER_MAX + 1):
+                    print(f"     {k} {names.get(k, '(정본 표에 없음)')}")
+            else:
+                print(f"     층위 정의는 정본 §1 을 보라: {CANON}")
+                print("     (여기에 사본을 두지 않는다 — 사본은 조용히 정본과 어긋난다)")
         else:
             bad, why = check_layer(a.layer, a.extends)
             if bad:
