@@ -39,8 +39,14 @@ class OntologyBuilder:
         domain: str = "",
         existing: Optional[dict] = None,
     ) -> tuple[dict, dict, list, list]:
-        """documents → 완성된 (concepts, ner_entities, relations, data_properties).
-        추출 후 결정적 dedup 적용. LLM 0회, 대용량 확장 가능(컨텍스트 초과 없음)."""
+        """documents → (concepts, ner_entities, relations, data_properties).
+        추출 후 결정적 dedup 적용. LLM 0회, 대용량 확장 가능(컨텍스트 초과 없음).
+
+        ⚠️ `data_properties` 는 **항상 빈 리스트**다. 기본 추출기
+        (DeterministicKoreanExtractor)가 datatype property 를 만들지 않기 때문이며,
+        README 언어지원 매트릭스에도 속성 축은 없다(표방 능력 아님).
+        실측(0830, ui_news100 독립 문서 8건): 관계 46건이 나오는 동안 속성은 8/8 문서 0건.
+        속성이 필요하면 LLM 추출기를 쓰거나 `extractor=` 로 주입한다."""
         concepts, entities, relations, data = await self.extractor.extract(
             documents, domain=domain, existing=existing)
 

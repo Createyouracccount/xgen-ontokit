@@ -250,7 +250,11 @@ class DeterministicKoreanExtractor:
     ) -> tuple[dict, dict, list, list]:
         all_entities: dict[str, list] = {}
         all_relations: list = []
-        all_data_props: list = []
+        # ⚠️ 이 추출기는 datatype property 를 만들지 않는다 — 아래 반환까지 append 가 0곳이다.
+        # README 언어지원 매트릭스에도 '속성' 축은 없다(표방 능력 아님). 4-tuple 자리를
+        # 지키기 위한 빈 리스트이며, LLM 추출기(document_ontology_extractor)는 이 축을
+        # 채우므로 추출기를 바꾸면 그래프에서 속성 트리플이 조용히 사라진다.
+        all_data_props: list = []  # 항상 빈 리스트 (구조적)
 
         # 클래스 이름 → source_chunks(set) 딕셔너리 누적 — 매 청크 merge_concepts(O(T·C),
         # 내부 리스트 선형탐색까지 겹쳐 사실상 제곱)를 폐기. 청크당 O(1) dict 갱신 후

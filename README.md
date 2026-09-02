@@ -57,6 +57,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 | **관계** | ✅ 조사 SVO(규칙) + KLUE-RE 인코더(opt-in) | ✅ **spaCy 의존 SVO(opt-in, v0.13)** | 한국어만 |
 | 인스턴스 타이핑 | ✅ 정의문(opt-in) + **직업 P106 어휘집(기본 on)** | ❌ 미지원 | 한국어만 |
 | OWL 라벨 | `@ko` | `@en` (자동판정) | 혼재 출력 |
+| **속성(datatype property)** | ❌ 미지원 | ❌ 미지원 | ❌ |
 
 ⚠️ 품질 검증 범위: 한국어=finreg 489 실측, 영어=구조 테스트만(코퍼스 실측 미완).
 관계추출: 규칙 조사SVO는 **가용성 폴백 전용**으로 지위 확정(앙상블 영구 기각, B3) + **KLUE-RE 인코더 채널(opt-in, holdout micro-F1 0.6274 — 외부 gold KLUE-RE)**.
