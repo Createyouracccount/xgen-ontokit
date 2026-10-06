@@ -176,7 +176,7 @@ def build(f, seed=20261006):
                 occ_super.add(a)
     closure_classes = classes | occ_super
     cls_rows = []
-    for c in closure_classes:
+    for c in sorted(closure_classes):
         if not (f.objects.get(c) or {}).get("label"):
             continue
         m = f.members(c, occ_only=(c in occ_super and c not in classes))
@@ -297,7 +297,81 @@ def build(f, seed=20261006):
             {"op": "list", "return": "y",
              "where": [{"t": "rel", "s": {"const": f.ent[s]["names"][0]}, "p": rel, "o": {"var": "y"}}]},
             {"items": [item(f, o, f.ent[s]["docs"]) for o in sorted(objs)]}, {"rel": rel, "subj": s, "n": len(objs)})
+
+    # 정답 = 계획의 의미를 사실 집합 위에서 계산한 값(질의 의미와 일치).
+    # 1차 오라클 대조에서 '독일'(독일·서독…) 같은 이름 중의성과 클래스 폐포 범위가
+    # 정답 생성과 질의 의미 사이에서 어긋났음을 확인 → 이름 합집합·전체 타입 폐포로 통일.
+    ev = Evaluator(f)
+    for q in qs:
+        sol = ev.solve(q["plan"])
+        q["gold"]["items"] = [item(f, k, docs) for k, docs in sorted(sol.items())]
+        if q["form"] == "A":
+            q["gold"]["count"] = len(sol)
+        q["meta"]["n"] = len(sol)
     return qs
+
+
+class Evaluator:
+    """IR 계획을 사실 집합 위에서 직접 푼다 — 컴파일러(SPARQL)와 독립된 두 번째 구현."""
+
+    def __init__(self, f):
+        self.f = f
+        self.by_name = collections.defaultdict(set)
+        for q, e in f.ent.items():
+            for n in e["names"]:
+                self.by_name[norm(n)].add(q)
+        for q, rec in f.objects.items():
+            for n in names_of(rec):
+                self.by_name[norm(n)].add(q)
+        self.subjects = {q for q, e in f.ent.items() if e["subject"] and e["docs"]}
+        self.edges = collections.defaultdict(set)   # (rel) → {(s, o)}
+        for (s, rel), objs in f.rels.items():
+            for o in objs:
+                self.edges[rel].add((s, o))
+
+    def pairs(self, rel):
+        out = set(self.edges[rel])
+        inv = RELATIONS[rel][4]
+        if inv:
+            out |= {(o, s) for s, o in self.edges[inv]}
+        return out
+
+    def isa(self, s, cname):
+        cs = self.by_name.get(norm(cname), set())
+        return any(t in cs or cs & self.f.ancestors(t) for t in self.f.types.get(s, {}))
+
+    def solve(self, plan):
+        binds = [{}]
+        for c in plan["where"]:
+            nxt = []
+            for b in binds:
+                if c["t"] == "isa":
+                    cands = [b[c["v"]]] if c["v"] in b else list(self.subjects if c["v"] == "x" else self.f.types)
+                    nxt += [{**b, c["v"]: s} for s in cands if self.isa(s, c["class"])]
+                    continue
+                for s, o in self.pairs(c["p"]):
+                    nb, ok = dict(b), True
+                    for t, val in ((c["s"], s), (c["o"], o)):
+                        if isinstance(t, dict) and "const" in t:
+                            ok &= val in self.by_name.get(norm(t["const"]), set())
+                        else:
+                            v = t if isinstance(t, str) else t["var"]
+                            if v in nb and nb[v] != val:
+                                ok = False
+                            nb[v] = val
+                    if ok:
+                        nxt.append(nb)
+            binds = nxt
+        binds = [b for b in binds if "x" not in b or b["x"] in self.subjects]
+        r = plan["return"]
+        sol = collections.defaultdict(set)
+        for b in binds:
+            src = b.get("x", b[r])
+            sol[b[r]].update(self.f.ent.get(src, {}).get("docs", []))
+            if r != "x" and isinstance(plan["where"][0].get("s"), dict):   # 상수 주어(L)
+                sol[b[r]].update(d for q in self.by_name.get(norm(plan["where"][0]["s"]["const"]), set())
+                                 for d in self.f.ent.get(q, {}).get("docs", []))
+        return {k: sorted(v) for k, v in sol.items()}
 
 
 def export_facts(f):

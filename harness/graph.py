@@ -195,8 +195,8 @@ async def load(g, run, arm):
 
 
 def main():
-    _, run, arm, src = sys.argv[:4]
-    docs = [json.loads(l) for l in open(sys.argv[4])] if len(sys.argv) > 4 else []
+    run, arm, src = sys.argv[2:5]
+    docs = [json.loads(l) for l in open(sys.argv[5])] if len(sys.argv) > 5 else []
     data = json.load(open(src))
     stats = {}
     if arm in ("oracle", "placebo"):

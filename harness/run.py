@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import time
+import urllib.error
 
 from harness import schema as S
 
@@ -75,7 +76,9 @@ async def main():
         for q in qs:
             try:
                 plans[q["id"]] = {"plan": llm_plan(q["q"]), "err": None}
-            except Exception as e:  # 계획 실패는 0점으로 기록 — 감추지 않는다
+            except (urllib.error.URLError, ConnectionError, TimeoutError):
+                raise   # 인프라 장애(LLM 서버 다운)는 계획기 품질이 아니다 — 측정 중단(1차 사고)
+            except Exception as e:  # 계획 형식 실패는 0점으로 기록 — 감추지 않는다
                 plans[q["id"]] = {"plan": None, "err": str(e)[:200]}
     res = {"run": a.run, "arms": arms, "ts": time.strftime("%Y-%m-%d %H:%M"), "rows": []}
     for q in qs:
