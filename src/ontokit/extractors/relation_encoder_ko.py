@@ -63,6 +63,8 @@ _SUBJ_TYPES = frozenset({"PER", "ORG"})
 # "상한 삭감=관계 -26%" 실측은 청크 전조합 시절 수치로, 문장 스코프에서는 상한 도달
 # 자체가 드묾. 상한 의미는 이제 병리적 밀집 문장 보호용 안전핀. 60 유지(청크당).
 MAX_PAIRS_PER_CHUNK = 60
+# 문장당 상한 모드의 청크 안전핀(병리적 초장문 청크 보호).
+MAX_PAIRS_SAFETY = 600
 # 인코더 forward 배치 크기 — self._pipe 에 미지정 시 HF 는 1건씩 순차 추론(CPU 손해).
 # NER(entities_batch=32)과 동일하게 배치화. mixed20k 실측: 밀집청크 batch=1 82.6초→
 # batch=32 40.0초(2.07배), 관계 결과 불변. 상한 삭감(관계 손실) 대신 이걸로 속도 확보.
@@ -190,6 +192,14 @@ def _gate(label: str, s_cls: str, o_cls: str, obj_surface: str, sentence: str) -
     return None
 
 
+def _topic_josa(word: str) -> str:
+    """주제 접두 조사 — 받침 있으면 '은', 없으면(또는 비한글) '는'."""
+    ch = word[-1] if word else ""
+    if "가" <= ch <= "힣":
+        return "은" if (ord(ch) - 0xAC00) % 28 else "는"
+    return "는"
+
+
 def _klue_type(cls: str) -> str:
     return _CLASS_TO_KLUE_TYPE.get(cls, "POH")
 
@@ -260,6 +270,17 @@ class KoreanRelationEncoder:
                         raw, DEFAULT_MIN_SCORE)
         self._min_score = min_score
         self._lock = threading.Lock()
+        # 온톨로지 하네스 2차(opt-in, 기본 off — 기본 경로 불변). 생성 시점에 읽는다
+        # (모듈 import 시점 읽기는 같은 프로세스 A/B 를 깨뜨린다 — 0910 감사 지적).
+        #  ONTOKIT_RE_MAX_PAIRS_PER_SENT=N : 쌍 상한을 청크(60) 대신 문장당 N 으로. 긴 청크에서
+        #    앞 1~2문장이 상한을 독식해 뒤 문장(출생·학력·소속)이 후보조차 못 되던 것(wiki2 실측).
+        #  ONTOKIT_RE_TOPIC_SUBJECT=1 : 문서 주제 개체(첫 문장 최선두 PER/ORG)를 그 개체가 없는
+        #    문장의 영주어로 복원("주제는 …" 접두) — 한국어 주어 생략("…에서 태어났다") 대응.
+        try:
+            self._sent_cap = max(0, int(os.getenv("ONTOKIT_RE_MAX_PAIRS_PER_SENT", "0")))
+        except ValueError:
+            self._sent_cap = 0
+        self._topic_subject = os.getenv("ONTOKIT_RE_TOPIC_SUBJECT", "0") == "1"
 
     def warmup(self):
         """모델을 즉시 로드(지연 로드 강제 트리거). 경로 오류·extras 미설치를
@@ -283,7 +304,8 @@ class KoreanRelationEncoder:
         인코더에 던져 고확신 날조를 양산했다(ui_news100 실측: FABRICATED 66%가
         문장 경계 밖 쌍). 같은 문장에 동시 출현하는 쌍만 후보로 생성하고, 마킹
         입력도 그 문장으로 한다. subj∈{PER,ORG}(학습 마커 분포 유지 — 지역 주어
-        허용은 게이트 계약에만 명시, 쌍 미생성이라 실발화 없음). 상한은 청크당.
+        허용은 게이트 계약에만 명시, 쌍 미생성이라 실발화 없음). 상한은 청크당
+        (ONTOKIT_RE_MAX_PAIRS_PER_SENT 지정 시 문장당).
         반환: (sw, stype, ow, otype, s_cls, o_cls, sentence)"""
         typed = []
         seen_e = set()
@@ -293,9 +315,18 @@ class KoreanRelationEncoder:
                 continue
             seen_e.add(w)
             typed.append((w, e.get("class", "") or ""))
+        sent_cap = getattr(self, "_sent_cap", 0)  # __new__ 로 만든 객체(테스트) 하위호환
+        topic = self._topic(typed, sentences) if getattr(self, "_topic_subject", False) else None
         pairs = []
         for sent in sentences:
             within = [(w, c) for w, c in typed if w in sent]
+            cand = []
+            if topic and topic[0] not in sent:
+                # 영주어 복원: 주제 개체를 주어로 접두한 문장에서 (주제, 문장 내 개체) 쌍
+                aug = f"{topic[0]}{_topic_josa(topic[0])} {sent}"
+                tt = _klue_type(topic[1])
+                cand += [(topic[0], tt, ow, _klue_type(o_cls), topic[1], o_cls, aug)
+                         for ow, o_cls in within if ow != topic[0] and ow not in topic[0]]
             for i, (sw, s_cls) in enumerate(within):
                 stype = _klue_type(s_cls)
                 if stype not in _SUBJ_TYPES:
@@ -303,10 +334,32 @@ class KoreanRelationEncoder:
                 for j, (ow, o_cls) in enumerate(within):
                     if i == j or sw == ow:
                         continue
-                    pairs.append((sw, stype, ow, _klue_type(o_cls), s_cls, o_cls, sent))
+                    cand.append((sw, stype, ow, _klue_type(o_cls), s_cls, o_cls, sent))
+            if sent_cap:
+                pairs += cand[:sent_cap]
+                if len(pairs) >= MAX_PAIRS_SAFETY:
+                    return pairs[:MAX_PAIRS_SAFETY]
+            else:
+                for c in cand:
+                    pairs.append(c)
                     if len(pairs) >= MAX_PAIRS_PER_CHUNK:
                         return pairs
         return pairs
+
+    @staticmethod
+    def _topic(typed: list[tuple], sentences: list[str]) -> Optional[tuple]:
+        """문서 주제 개체 — 첫 문장에서 가장 앞에 나오는 PER/ORG 개체(표제·정의문 주어)."""
+        if not sentences:
+            return None
+        first = sentences[0]
+        best = None
+        for w, c in typed:
+            if _klue_type(c) not in _SUBJ_TYPES:
+                continue
+            i = first.find(w)
+            if i >= 0 and (best is None or i < best[0]):
+                best = (i, w, c)
+        return (best[1], best[2]) if best else None
 
     def extract(self, text: str, *, source_chunks: list[str]) -> list[dict]:
         """청크 → 관계 dict 리스트(kg_builder 소비 스키마, 규칙 채널과 동일).

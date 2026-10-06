@@ -114,3 +114,25 @@ def test_min_score_env_rejects_nonfinite(monkeypatch, bad):
     # 무력화. nan/inf/음수는 거부하고 기본값 폴백해야 한다.
     monkeypatch.setenv("ONTOKIT_RELATION_CONF_MIN", bad)
     assert KoreanRelationEncoder(model="dummy")._min_score == DEFAULT_MIN_SCORE
+
+
+def test_topic_subject_restores_zero_anaphora():
+    # 하네스 2차: 주제 개체가 없는 문장에 영주어를 복원해 (주제, 개체) 쌍을 만든다(opt-in).
+    enc = KoreanRelationEncoder.__new__(KoreanRelationEncoder)
+    ents = [{"entity": "김철수", "class": "인물"}, {"entity": "서울", "class": "지역"}]
+    sents = ["김철수는 대한민국의 배우이다.", "서울에서 태어났다."]
+    assert enc._pairs(ents, sents) == []          # 기본(off): 문장 밖 쌍 없음
+    enc._topic_subject, enc._sent_cap = True, 0
+    pairs = enc._pairs(ents, sents)
+    assert [(p[0], p[2], p[6]) for p in pairs] == [("김철수", "서울", "김철수는 서울에서 태어났다.")]
+
+
+def test_sentence_cap_keeps_later_sentences():
+    # 하네스 2차: 문장당 상한이면 앞 문장이 청크 상한(60)을 독식하지 않는다.
+    enc = KoreanRelationEncoder.__new__(KoreanRelationEncoder)
+    many = [{"entity": f"기관{i}", "class": "기관"} for i in range(12)]
+    late = [{"entity": "홍길동", "class": "인물"}, {"entity": "한양", "class": "지역"}]
+    sents = [" ".join(e["entity"] for e in many), "홍길동 한양 출생."]
+    assert not any(p[0] == "홍길동" for p in enc._pairs(many + late, sents))   # 청크 상한 60 소진
+    enc._sent_cap = 20
+    assert any(p[0] == "홍길동" and p[2] == "한양" for p in enc._pairs(many + late, sents))
