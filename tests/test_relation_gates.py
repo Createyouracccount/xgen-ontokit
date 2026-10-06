@@ -150,3 +150,12 @@ def test_location_relations_channel():
     assert [(r["predicate"], r["object"]) for r in rels2] == [("per:origin", "미국")]
     # 패턴 밖 언급은 내지 않는다
     assert location_relations(ents2, ["김철수는 미국과 협상했다."], source_chunks=["c"]) == []
+
+
+def test_suffix_org_candidates():
+    # 하네스 5차: NER 미포착 기관 접미 명사구 보충(조사 분리·NER 중복 제외)
+    from ontokit.extractors.relation_encoder_ko import suffix_org_candidates
+    sents = ["그는 매사추세츠 공과대학교를 졸업하고 삼성전자에 입사했다.", "고려대학교에서 박사 학위를 받았다."]
+    got = {c["entity"] for c in suffix_org_candidates(sents, [{"entity": "삼성전자"}])}
+    assert got == {"매사추세츠 공과대학교", "고려대학교"}
+    assert suffix_org_candidates(["고려대학교에서 강의했다."], [{"entity": "고려대학교"}]) == []

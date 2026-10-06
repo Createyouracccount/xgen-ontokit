@@ -275,6 +275,42 @@ def location_relations(entities: list[dict], sentences: list[str], *,
     return out
 
 
+# ── 기관 접미 명사구 후보 (opt-in ONTOKIT_RE_SUFFIX_ORG=1) ──
+_ORG_SUFFIX = ("대학교", "대학원", "대학", "고등학교", "중학교", "학교", "학원", "회사", "그룹", "은행",
+               "구단", "클럽", "정당", "협회", "위원회", "연구소", "연구원", "병원", "재단", "공사")
+_JOSA_END = ("은", "는", "이", "가", "을", "를", "에", "의", "로", "와", "과", "도", "서", "며", "고", "다")
+_TOKEN = re.compile(r"[가-힣A-Za-z0-9]+")
+
+
+def suffix_org_candidates(sentences: list[str], entities: list[dict]) -> list[dict]:
+    """문장 안 1~3어절 명사구 중 기관 접미로 끝나는 것을 NER 미포착분만 '기관' 으로.
+    마지막 어절이 접미로 끝나야 하고(조사가 붙은 어절은 조사 앞까지), 앞 어절이 조사로
+    끝나면 거기서 끊는다. 이미 NER 개체와 겹치는 표면형은 내지 않는다."""
+    have = [e.get("entity") or "" for e in entities]
+    out, seen = [], set()
+    for sent in sentences:
+        toks = [(m.group(), m.start()) for m in _TOKEN.finditer(sent)]
+        for i, (t, _) in enumerate(toks):
+            core = next((t[:len(t) - len(j)] for j in ("에서", "으로", "에") + _JOSA_END
+                         if t.endswith(j) and t[:len(t) - len(j)].endswith(_ORG_SUFFIX)), t)
+            if not core.endswith(_ORG_SUFFIX) or core in _ORG_SUFFIX:
+                continue
+            words = [core]
+            for k in range(i - 1, max(-1, i - 3), -1):
+                w = toks[k][0]
+                if w.endswith(_JOSA_END) or w.isdigit():
+                    break
+                words.insert(0, w)
+            surf = " ".join(words)
+            if surf not in sent:   # 어절 사이가 공백 하나가 아니면 원문 표면형을 못 만든다
+                surf = core
+            if surf in seen or any(surf in h or h in surf for h in have if h):
+                continue
+            seen.add(surf)
+            out.append({"entity": surf, "class": "기관", "type": "INSTANCE", "channel": "suffix_org"})
+    return out
+
+
 class KoreanRelationEncoder:
     """KLUE-RE 파인튜닝 인코더 관계 채널. 지연 로드(사용 안 하면 안 깔림).
 
@@ -332,6 +368,9 @@ class KoreanRelationEncoder:
         #  ONTOKIT_LOC_REL=1 : 위치 서술 관계 채널(아래 location_relations). KLUE-RE 에 위치 관계가
         #    없어 위치 사실(위키 정답의 49%)이 0 이던 것(하네스 3차 손실 분해).
         self._loc_rel = os.getenv("ONTOKIT_LOC_REL", "0") == "1"
+        #  ONTOKIT_RE_SUFFIX_ORG=1 : NER 이 놓친 기관 접미 명사구('…대학교'·'…회사')를 '기관' 후보로 보충
+        #    (하네스 4차 분해: 출신학교 목적어 누락 41/48 이 이 형태).
+        self._suffix_org = os.getenv("ONTOKIT_RE_SUFFIX_ORG", "0") == "1"
 
     def warmup(self):
         """모델을 즉시 로드(지연 로드 강제 트리거). 경로 오류·extras 미설치를
@@ -422,6 +461,8 @@ class KoreanRelationEncoder:
             return []
         ents = self._ner.entities(text, source_chunks=source_chunks)
         sentences = _split_sentences(text)
+        if getattr(self, "_suffix_org", False):
+            ents = list(ents) + suffix_org_candidates(sentences, ents)
         pairs = self._pairs(ents, sentences)
         if not pairs:
             return []
