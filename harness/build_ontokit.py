@@ -26,7 +26,13 @@ def main():
              "chunk_index": d["chunk_index"]})
     # 제품 어댑터(feature/ontology-extractor-axis-0903 ontokit_extractor.py)와 같은 구성.
     # 코퍼스가 한국어라 영어 NER 은 생략(로드 비용만 큼).
-    builder = OntologyBuilder(ner=KoElectraNER())
+    # HARNESS_HEARST=1 → ontokit 정의문 채널(enable_hearst) opt-in(3차). 백과체 전용 권장 채널.
+    ner = KoElectraNER()
+    extractor = None
+    if os.getenv("HARNESS_HEARST") == "1":
+        from ontokit import DeterministicKoreanExtractor
+        extractor = DeterministicKoreanExtractor(ner=ner, enable_hearst=True)
+    builder = OntologyBuilder(extractor=extractor, ner=ner)
     t0 = time.time()
     concepts, entities, relations, data = asyncio.run(builder.build(payload))
     sec = time.time() - t0
