@@ -47,7 +47,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 ```
 (엔티티까지 뽑으려면 NER 주입이 필요하다 — [설치](#설치)·[기본값 표](#기본값--env-스위치-한눈에) 참조)
 
-## 언어 지원 매트릭스 (v0.15.0, 정직하게)
+## 언어 지원 매트릭스 (v0.16.0, 정직하게)
 
 | 축 | 한국어 | 영어 | 혼합 청크 |
 |---|---|---|---|
@@ -60,8 +60,8 @@ concepts, entities, relations, data = await ext.extract(documents)
 | **속성(datatype property)** | ❌ 미지원 | ❌ 미지원 | ❌ |
 
 ⚠️ 품질 검증 범위: 한국어=finreg 489 실측, 영어=구조 테스트만(코퍼스 실측 미완).
-관계추출: 규칙 조사SVO는 **가용성 폴백 전용**으로 지위 확정(앙상블 영구 기각, B3) + **KLUE-RE 인코더 채널(opt-in, holdout micro-F1 0.6274 — 외부 gold KLUE-RE)**.
-인코더는 env 로 켜며 미설정 시 규칙 폴백 — 아래 [관계 인코더](#관계-인코더-v013--klue-re--sredfm-ko-증강-holdout-06274) 참조.
+관계추출: 규칙 조사SVO는 **가용성 폴백 전용**으로 지위 확정(앙상블 영구 기각, B3) + **KLUE-RE 인코더 채널(opt-in, holdout micro-F1 0.6169 — 현행 v13c, 외부 gold KLUE-RE)**.
+인코더는 env 로 켜며 미설정 시 규칙 폴백 — 아래 [관계 인코더](#관계-인코더-v013--klue-re--sredfm-ko-증강-holdout-06169-v13c) 참조.
 ⚠️ v0.5 대비 동작 변화: `auto_english=True` 기본이라 **라틴 약어가 섞인 한국어 코퍼스에 영어 클래스가 새로 추가**된다(순수 한글 코퍼스는 출력 완전 동일 — finreg 489 실측).
 기존 동작 유지가 필요하면 `auto_english=False`.
 ⚠️ v0.14 동작 변화: `enable_hearst` **기본 off** — 뉴스체 실그래프 실측에서 정의문 채널 유래 의미 subClassOf 의 거짓률 88.5%(비정의문 서술문의 구조적 오발화). 
@@ -69,6 +69,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 v0.12~v0.13 은 기본 on 이었다. `enable_occupation=True`(직업 타이핑)는 기본 on 유지.
 ⚠️ v0.15 동작 변화: `enable_qdt_gate` **기본 on** — 수량·날짜·시간(QT/DT/TI) 개체 중 **관계에 참여하지 않는 것**의 인스턴스 승격을 차단한다. 
 근거: 개체 정밀도 파일럿 (n=60, seed 20260810)에서 그래프 결함 38건 중 QT/DT/TI 유령("3분기"·"2023년" 류 문서 앵커 없는 값 개체)이 17건, 차단 시 오살 0. 관계 목적어(설립일 등)로 참여하는 개체는 보존된다. 구동작 복원: `enable_qdt_gate=False` 또는 `ONTOKIT_QDT_GATE=off`.
+⚠️ v0.16 동작 변화: **없음**. 관계 인코더에 새 채널 4개(아래 표)가 추가됐지만 전부 env opt-in 이라 기본 경로 출력은 v0.15 와 같다(기존 테스트 245 통과).
 
 ### 기본값 / env 스위치 한눈에
 
@@ -83,6 +84,10 @@ v0.12~v0.13 은 기본 on 이었다. `enable_occupation=True`(직업 타이핑)�
 | QDT 유령 게이트 | **on**(v0.15~) | `enable_qdt_gate=False` / `ONTOKIT_QDT_GATE=off` | 없음(규칙) |
 | 한국어 관계(조사 SVO) | **on** | `enable_relations=False` | 없음(Kiwi) |
 | 관계 인코더(KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers(로컬) |
+| ↳ 영주어 복원(v0.16) | off | `ONTOKIT_RE_TOPIC_SUBJECT=1` — 첫 문장 최선두 PER/ORG 를 주어 생략 문장의 주어로 | (인코더 on 필요) |
+| ↳ 문장당 쌍 상한(v0.16) | off(청크당 60) | `ONTOKIT_RE_MAX_PAIRS_PER_SENT=N` | (인코더 on 필요) |
+| ↳ 위치 서술 관계(v0.16) | off | `ONTOKIT_LOC_REL=1` — "Y의 …"·"Y에 있는"·"Y 북부" → `loc:located_in`·`loc:country`(인물은 `per:origin`) | (인코더 on 필요) |
+| ↳ 기관 접미 후보(v0.16) | off | `ONTOKIT_RE_SUFFIX_ORG=1` — NER 미포착 `…대학교`·`…회사` 류를 '기관' 후보로 | (인코더 on 필요) |
 | 영어 NER | off | `ONTOKIT_NER_EN=auto` | transformers(로컬) |
 | 영어 관계(spaCy) | off | `ONTOKIT_RELATION_EN=auto` | spaCy |
 | 보조 NER union | off | `ONTOKIT_NER_AUX_MODEL` | transformers(로컬) |
@@ -102,6 +107,22 @@ v0.12~v0.13 은 기본 on 이었다. `enable_occupation=True`(직업 타이핑)�
 | `ONTOKIT_NER_SPAN_GATE` | `0`(off) | 어절 경계 스팬 게이트(sg1). **기각·파킹** — 오살 24% 로 게이트 이득 초과, 재도전은 판별 기제부터 |
 | `ONTOKIT_NER_EMIT_MISC` | `0`(off) | 영어 NER 의 MISC 라벨 방출(구동작 복원용) |
 | `ONTOKIT_NN_JOIN` | `0`(off) | 관계 추출 시 공백 경계 명사 결합 보존(P0-2). ⚠️ XPN/SN 분기에는 미적용 — 어절 형태에 따라 결합이 끊긴다 |
+| `ONTOKIT_OCCUPATION_EVIDENCE` | `adj` | 직업 타이핑 증거 게이트 모드(B1 실측: 뉴스 오탐 63.6%→0%) |
+
+#### 실험 스위치 (기본 off — 기각·검증 전 상태로 코드에만 남은 것)
+
+⚠️ 아래는 **모듈 import 시점**에 읽는다 — 같은 프로세스에서 바꿔도 반영되지 않는다(A/B 는 프로세스를 나눌 것).
+켜기 전에 소스 주석의 기각 사유를 읽을 것.
+
+| env | 기본 | 상태 · 근거(소스) |
+|---|---|---|
+| `ONTOKIT_NER_AGGREGATION` | `simple` | `first` 는 절단 4.8배 감소 대신 조사 과다 포함 — **`ONTOKIT_WORD_BOUNDARY` 와 짝으로만**. `average`/`max` 는 실측 기각(값을 주면 예외) (`ner/koelectra.py`) |
+| `ONTOKIT_WORD_BOUNDARY` | off | 어절 경계 조사 트림. 심판 검증 전 (`ner/word_boundary.py`) |
+| `ONTOKIT_NER_OFFSET_SLICE` | off | 개체 문자열을 원문 슬라이스로(`140 %`→`140%` 류 재조립 공백 3.49%) (`ner/koelectra.py`) |
+| `ONTOKIT_SUFFIX_FRAGMENT` | off | 접미 조각 제거. 측정 방법 무효로 기각 — 처치 자체는 아마 옳음 (`ner/suffix_fragment.py`) |
+| `ONTOKIT_KO_SPAN_REPAIR` | off | 한국어 경계 복원. 오살률 4.35% > 공시 임계 3% 로 **롤백** (`ner/span_align.py`) |
+| `ONTOKIT_KO_LEFT_COMPLETE` | off | 좌측 복합명사 완성. 심판 3인 전원 REJECT — 안전성 주장 반증 (`ner/span_align.py`) |
+| `ONTOKIT_CONCEPT_GATE` (+`_CLASSES`, `ONTOKIT_P279_SNAPSHOT`) | off | P279 개념 게이트(보통명사를 개체에서 제외). R14 −1.05pp 로 파킹. ⚠️ 스냅샷 경로가 없으면 **조용히 무동작** (`filter/concept_gate.py`) |
 
 **불변식**: 기본 경로는 **LLM 호출 0회 · transformers 로드 0회**. 모델을 쓰는 채널은 전부 env opt-in 이고, 기본 on 인 신규 채널(직업 타이핑)도 패키지 동봉 어휘집만 읽는다(네트워크 0). 
 유일한 LLM 경로는 `relation_hybrid.HybridRelationExtractor` 로, `relation_extractor=` 로 **명시 주입**해야만 진입하며 예산 0 이면 순수 규칙과 동치다.
@@ -171,7 +192,7 @@ col.add_chunk(chunk_id, [(uri, label), ...])   # 청크 스트리밍
 edges = col.edges(exclude_pairs=svo_pairs)      # [(a, b, count)] — SVO 기연결 제외
 ```
 
-## 관계 인코더 (v0.13) — KLUE-RE + SREDFM-ko 증강, holdout 0.6274
+## 관계 인코더 (v0.13) — KLUE-RE + SREDFM-ko 증강, holdout 0.6169 (v13c)
 ```bash
 pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
 export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # 이 env가 on/off 스위치
@@ -217,13 +238,13 @@ export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re_scale_large_fp16
 
 교란 제거 측정(동결 dev·base 재현 Δ0.0001)에서 무관계 인명쌍(PER-PER no_relation) 리콜이 전 arm −16~−25pt — 데이터 추가/업웨이트는 특정 술어만 살리지 못하고 **no_rel 결정 경계를 전역 이동**시킨다(colleagues 무접촉 arm 도 동일 패턴). 
 후속 rel3·v15(같은 날)에서 선택성 기제 2종도 기각 — 추론단 보정은 CONF_MIN 하 실전 공허(구제 대상 전량 conf<0.5), 표적 카운터웨이트(합의 무관계 네거 195)는 no_rel PER-PER 리콜을 역악화시키고 FP 질량을 인접 술어로 이동(풍선효과).
-**판례: small 용량에서 학습 데이터 조작으로 colleagues 선택 회복 불가 — 남은 경로는 모델 크기 상향(위 '미소진 레버')의 용량 가설 검증뿐.** 
+**판례: small 용량에서 학습 데이터 조작으로 colleagues 선택 회복 불가 — 남은 경로는 모델 크기 상향이었고, 0724 스케일링 라운드에서 large 로 검증됐다(위 '모델 프로파일', colleagues 0.576).** 
 arm 비교 학습은 `V13_FROZEN_DEV`(dev 분할·스트림 순서 동결) 필수 — dev 가 하드셋 길이 종속이라 동결 없이는 best-epoch 교란으로 측정이 오염된다.
 전 과정 원장: `eval_runs/relations/v14_round_closure.md`(빌드 리포 외부 작업장).
 
 현재 채택본은 `eval/relation/MODEL_LOCK.json` 이 단일 진실원(release_tag·sha256 고정).
-⚠️ 모델 크기는 여전히 **small** — 공식 base 0.6666 / large 0.6959 대비 아래이며,
-증강이 아닌 **모델 크기 상향은 미소진 레버**다(LLM 없이 가능한 남은 개선 여지).
+⚠️ **기본** 모델은 여전히 **small** — 공식 base 0.6666 / large 0.6959 대비 아래다. 모델 크기 상향은
+0724 라운드에서 이미 검증·**파킹**됐다(`quality-large` opt-in 0.6726, 기본 발효는 비용 상한 위반으로 기각 — 위 '모델 프로파일').
 
 - **불변식**: env 미지정·extras 미설치·경로오류·NER부재 중 하나라도면 규칙 조사SVO 폴백.
   "설치·설정 안 하면 안 켜진다". NER(KoELECTRA)이 준 개체를 쌍으로 조합→관계 분류.
@@ -283,6 +304,40 @@ XGEN 은 이 라이브러리를 쓰는 사내 제품이다. 아래는 그 배선
 ```
 `ExtractorFactory`는 XGEN 기존 `RerankerFactory` 패턴(PROVIDER_NAMES + importlib + config) 복제.
 
+## 온톨로지 하네스 (v0.16, `harness/` — 측정·실험용, 패키지 밖)
+
+ontokit 그래프가 **열거·집계·역관계·다중 홉 질문에서 벡터 검색보다 나은가**를 같은 벤치로 재는 하네스.
+graphstore(백엔드 교체형 저장소) 위에서 같은 질의계획을 SPARQL(Fuseki)·Cypher(Neo4j)로 실행한다.
+
+```
+질문 → 계획기(로컬 LLM, IR JSON) → 컴파일러(IR → SPARQL / Cypher)
+     → graphstore create_store(Fuseki RDF | Neo4j LPG) → 채점(벡터 상한·대조군·부트스트랩)
+```
+
+- **질의가 온톨로지 의미를 쓴다**: 하위 클래스 폐포(`rdf:type/rdfs:subClassOf*`), 역관계 UNION, 별칭 연결, 표제 한정
+- **벤치**: 한국어 위키 리드 3,000문서 + **Wikidata 사실 중 본문에 적힌 것만** 정답(도구 무관). 210문항 7형태(타입 열거·계층 폐포·
+  역관계·집계·교차·다중 홉 + 단순 조회 대조), 결정적 생성·해시 고정. 벡터는 제품 검색 API 의 **상한**으로 채점(벡터에 유리)
+- **대조군**: 오라클 그래프(양성)·위약(음성, 전단사 치환). 측정 유효 조건 = 오라클 ≥ 0.90, 위약 ≤ 0.15
+- **스키마 발견 모드**(`harness/discover.py`): 고정 스키마 없이 기존 저장소의 실제 술어로 계획·질의 — XGEN 제품 그래프에도 붙는다
+
+**결과 (구조형 180문항 평균, 1.0 만점)**
+
+| 그래프 | 점수 | 벡터 상한 V40(0.162) 대비 [95% CI] |
+|---|---|---|
+| 정답 그래프 + 실제 계획기 | **0.879** | **+0.717 [+0.652, +0.779]** |
+| ontokit — 1차(v0.15 기본 + 인코더) | 0.018 | −0.144 |
+| ontokit — 5차(v0.16 opt-in 4개 + 정의문 채널) | **0.128** | −0.033 [−0.086, +0.019] |
+| 현행 XGEN 제품 그래프(같은 문서) | 0.040 | −0.121 |
+
+- **하네스는 입증**: 그래프가 맞으면 벡터를 크게 이긴다. RDF·LPG 동치 210/210(그래프 3종).
+- **ontokit 은 아직 벡터 상한을 못 넘는다**: 5차에 걸쳐 7배 개선(관계 사실 재현율 1.6→16.7%, 타입 4.8→11.5%)했지만
+  사전 공시한 "+0.15" 에 미달 → **가설 H1(LLM-free 추출로 이긴다) 검증 실패**. 타입 열거 형태에서만 벡터를 넘었다(방향만, n=30).
+- 6차부터 가설 H2(로컬 LLM 스키마 유도 추출, 외부 API 0) 진행 중.
+- ⚠️ 정의문 채널은 백과체 전용 처치다. 위키 결과를 다른 문체(뉴스·상품·정책 문서)로 일반화하지 말 것.
+
+차수별 사전 공시·결과·측정하지 않은 것: [`harness/docs/`](harness/docs/). 실행 의존: Fuseki·Qdrant·문서 서비스(벡터 기준선),
+ollama(`qwen3:8b`), graphstore 소스(`GRAPHSTORE_SRC`), Neo4j 5(동치 검증). 원자료(`harness/data/`)는 커밋하지 않는다.
+
 ## 구조
 ```
 src/ontokit/
@@ -294,12 +349,16 @@ src/ontokit/
 ├── hierarchy/            # suffix_share(접미공유·주엔진, ko=문자/en=단어), hearst_ko(정의문, 기본 off v0.14~)
 ├── instance_typing/      # occupation(P106 어휘집·기본 on) + evidence + hygiene (v0.13)
 ├── ner/                  # koelectra(ko) + english(dslim BERT MIT) + ensemble·span_align
+│                         #   word_boundary·suffix_fragment (실험 스위치, 기본 off)
 ├── dedup/                # deterministic(형태소) + synonym_dict(우리말샘, opt-in)
 │                         #   class_synonyms(TBox 후보 제안 — 병합 안 함, 오프라인 검토용)
 ├── citations.py          # doc-level :cites 인용 수집·SPARQL 방출 (v0.8)
 ├── filter/               # class_promotion — termhood 승격 게이트 (v0.9)
+│                         #   concept_gate — P279 개념 게이트 (기본 off, 파킹)
 ├── cooccurrence.py       # coOccursWith 동시출현 약관계 — 관계밀도 확충 (v0.10)
 └── search/               # improvements (subClassOf*, floor guard) — ⚠️XGEN 전용
+
+harness/                  # 온톨로지 하네스 — 패키지 밖(설치되지 않음). 측정·실험용, 아래 절 참조
 ```
 
 ## 품질 근거 — 직접 재현할 수 있는 것만
@@ -310,7 +369,7 @@ src/ontokit/
 
 | 축 | 외부 gold | 라이선스 | 결과 | 재현 |
 |---|---|---|---|---|
-| **관계** | KLUE-RE (공식 validation 7,765) | CC BY-SA 4.0 | holdout micro-F1 **0.6274** | [`eval/relation/`](eval/relation/) |
+| **관계** | KLUE-RE (공식 validation 7,765) | CC BY-SA 4.0 | holdout micro-F1 **0.6169**(현행 v13c · v12 0.6274 · large 0.6726) | [`eval/relation/`](eval/relation/) |
 | **계층** | Wikidata P279 + 한국어 위키피디아 lead | CC0 | ⚠️ 아래 주의 참조 | [`eval/hierarchy/`](eval/hierarchy/) |
 | **개체정규화(ER)** | 한국어 위키피디아 redirect | CC BY-SA 4.0 | balanced F1 **0.776** — 게이트 0.80 **미달** | [`eval/entity_resolution/`](eval/entity_resolution/) |
 | 세밀 타이핑 | (자체 실측) | — | **폐기** — 재타입 0.16%, 효과 없음 | [`eval/instance_typing/`](eval/instance_typing/) |
@@ -337,7 +396,7 @@ python eval_encoder.py holdout
   접미공유 계층은 별개 실측 — finreg 489 는 subClassOf 1,710). 뉴스체에서 계층이
   필요하면 채널 실태를 이 수치로 판단하고 설계할 것.
 - **"NN/100 심판" 점수는 전부 자체 심판 루프**의 결과다(프로토콜은
-  `eval/*/JUDGE_PROTOCOL.md`). 외부 재채점이 아니다. 외부 gold 에 직접 앵커된 수치는 관계 holdout(0.6274)과 ER(0.776) 둘뿐이다.
+  `eval/*/JUDGE_PROTOCOL.md`). 외부 재채점이 아니다. 외부 gold 에 직접 앵커된 수치는 관계 holdout(0.6169, v13c)과 ER(0.776) 둘뿐이다.
 - **ER 은 미탑재**다. 임베딩이 동의어와 주제근접을 원리적으로 분리하지 못해(AUC 천장 ~0.81)
   게이트 미달 → 의도적으로 배선하지 않았다. 기본 dedup 은 형태소 기반이며,
   사전 병합은 `ONTOKIT_SYNONYM_DICT` opt-in 이다.
@@ -348,7 +407,9 @@ python eval_encoder.py holdout
 public 리포라 **인증 없이** 설치된다:
 
 ```bash
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.15.0"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
 ```
+⚠️ 원격에 올라간 최신 태그는 현재 **v0.13.1** 이다(v0.14.0~v0.16.0 태그 미푸시). 태그가 올라가기 전에는
+위 명령이 실패하므로 커밋 SHA 로 고정한다(`...xgen-ontokit.git@<commit>`).
 버전 고정을 권장한다(기본 on 채널이 마이너 버전에서 바뀐 이력이 있다 — 위 동작 변화 주의 참조).
 `pyproject.toml` dependencies 또는 requirements 에 위 URL 을 추가하면 된다.

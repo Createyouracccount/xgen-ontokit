@@ -33,7 +33,7 @@ concepts, entities, relations, data = await ext.extract(documents)
 (Entity extraction requires injecting a NER — see [Install](#install) and the
 [defaults table](#defaults--env-switches-at-a-glance).)
 
-## Language support matrix (v0.15.0, stated honestly)
+## Language support matrix (v0.16.0, stated honestly)
 
 | Axis | Korean | English | Mixed chunks |
 |---|---|---|---|
@@ -48,8 +48,8 @@ concepts, entities, relations, data = await ext.extract(documents)
 tests only (corpus measurement incomplete).
 Relation extraction: the rule-based particle SVO channel is now **availability-fallback only**
 (ensemble permanently rejected, B3) + **KLUE-RE encoder channel (opt-in, holdout micro-F1
-0.6274 — external gold KLUE-RE)**. The encoder is enabled via env; when unset it falls back
-to rules — see [Relation encoder](#relation-encoder-v013--klue-re--sredfm-ko-augmented-holdout-06274) below.
+0.6169 — current v13c, external gold KLUE-RE)**. The encoder is enabled via env; when unset it falls back
+to rules — see [Relation encoder](#relation-encoder-v013--klue-re--sredfm-ko-augmented-holdout-06169-v13c) below.
 ⚠️ Behavior change vs v0.5: `auto_english=True` is the default, so **English classes are
 newly added to Korean corpora containing Latin acronyms** (pure-Hangul corpora produce
 identical output — measured on finreg 489). Set `auto_english=False` to keep prior behavior.
@@ -64,6 +64,8 @@ entity-precision pilot (n=60, seed 20260810) — 17 of 38 graph defects were QT/
 ghosts ("Q3", "year 2023"-style value entities with no document anchor); blocking kills
 zero legitimate entities. Entities serving as relation objects (founding dates etc.) are
 preserved. Restore old behavior: `enable_qdt_gate=False` or `ONTOKIT_QDT_GATE=off`.
+⚠️ v0.16 behavior change: **none**. Four new relation-encoder channels (table below) were added,
+all env opt-in, so default-path output equals v0.15 (existing 245 tests pass).
 
 ### Defaults / env switches at a glance
 
@@ -78,6 +80,10 @@ What a no-arg `DeterministicKoreanExtractor()` turns on, vs what only env enable
 | QDT ghost gate | **on** (v0.15~) | `enable_qdt_gate=False` / `ONTOKIT_QDT_GATE=off` | no (rules) |
 | Korean relations (particle SVO) | **on** | `enable_relations=False` | no (Kiwi) |
 | Relation encoder (KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers (local) |
+| ↳ zero-subject restoration (v0.16) | off | `ONTOKIT_RE_TOPIC_SUBJECT=1` — the first sentence's leading PER/ORG becomes the subject of subject-dropped sentences | (needs encoder) |
+| ↳ per-sentence pair cap (v0.16) | off (60 per chunk) | `ONTOKIT_RE_MAX_PAIRS_PER_SENT=N` | (needs encoder) |
+| ↳ location-statement relations (v0.16) | off | `ONTOKIT_LOC_REL=1` — "Y의 …"·"Y에 있는"·"Y 북부" → `loc:located_in`·`loc:country` (`per:origin` for persons) | (needs encoder) |
+| ↳ institution-suffix candidates (v0.16) | off | `ONTOKIT_RE_SUFFIX_ORG=1` — NER-missed `…대학교`·`…회사` spans added as ORG candidates | (needs encoder) |
 | English NER | off | `ONTOKIT_NER_EN=auto` | transformers (local) |
 | English relations (spaCy) | off | `ONTOKIT_RELATION_EN=auto` | spaCy |
 | Auxiliary NER union | off | `ONTOKIT_NER_AUX_MODEL` | transformers (local) |
@@ -88,6 +94,22 @@ model-backed channel is env opt-in, and the one new on-by-default channel (occup
 only reads a lexicon bundled in the package (zero network). The sole LLM path is
 `relation_hybrid.HybridRelationExtractor`, reachable only by **explicitly injecting**
 `relation_extractor=`, and with a zero budget it is equivalent to pure rules.
+
+#### Experimental switches (off by default — rejected or not yet validated)
+
+⚠️ These are read at **module import time** — changing them inside a running process has no
+effect (run A/B arms in separate processes). Read the rejection notes in the source first.
+
+| env | default | status · basis (source) |
+|---|---|---|
+| `ONTOKIT_NER_AGGREGATION` | `simple` | `first` cuts truncation 4.8× but over-includes particles — **only paired with `ONTOKIT_WORD_BOUNDARY`**. `average`/`max` rejected (raises) (`ner/koelectra.py`) |
+| `ONTOKIT_WORD_BOUNDARY` | off | particle trim at word boundary; not yet judged (`ner/word_boundary.py`) |
+| `ONTOKIT_NER_OFFSET_SLICE` | off | take entity strings from source slices (fixes `140 %`-style rejoin spaces, 3.49%) (`ner/koelectra.py`) |
+| `ONTOKIT_SUFFIX_FRAGMENT` | off | suffix-fragment removal; rejected because the measurement was invalid (`ner/suffix_fragment.py`) |
+| `ONTOKIT_KO_SPAN_REPAIR` | off | Korean span repair; **rolled back** (kill rate 4.35% > pre-declared 3%) (`ner/span_align.py`) |
+| `ONTOKIT_KO_LEFT_COMPLETE` | off | left compound completion; 3/3 judges REJECT (`ner/span_align.py`) |
+| `ONTOKIT_CONCEPT_GATE` (+`_CLASSES`, `ONTOKIT_P279_SNAPSHOT`) | off | P279 concept gate; parked (R14 −1.05pp). ⚠️ silently no-op without a snapshot path (`filter/concept_gate.py`) |
+| `ONTOKIT_OCCUPATION_EVIDENCE` | `adj` | occupation-typing evidence gate mode (news false positives 63.6%→0%) |
 
 ## Philosophy
 - **Zero core dependencies** — backends·models (kiwipiepy/transformers/httpx) are all extras.
@@ -107,7 +129,7 @@ pip install "xgen-ontokit[all]"          # everything
 # ⚠️ english-relations needs the spaCy model fetched separately (not a PyPI package):
 #   python -m spacy download en_core_web_sm
 # Direct from GitHub:
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.15.0"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
 ```
 
 ## Build — LLM-free Korean·English extraction
@@ -169,7 +191,7 @@ measured: 1.75%→10.5%, SVO 100% preserved, displayed junk rate ~18%.
 Truncated·merged fragments (`대구광역`) are beyond morphological detection (upstream NER).
 The figures above are measured on an internal corpus (not external gold).
 
-## Relation encoder (v0.13) — KLUE-RE + SREDFM-ko augmented, holdout 0.6274
+## Relation encoder (v0.13) — KLUE-RE + SREDFM-ko augmented, holdout 0.6169 (v13c)
 ```bash
 pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
 export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # this env is the on/off switch
@@ -183,12 +205,15 @@ Fine-tuned klue/roberta-small, **zero LLM API calls** (local inference, same fam
 |---|---|---|
 | re-ko-v1 | 0.5924 | consistent with the official roberta-small baseline 60.85 |
 | re-ko-aug-v1 | 0.6259 | SREDFM-ko augmentation |
-| **re-ko-aug-v12 (current)** | **0.6274** | removed 721 unsupported P112 rows — `founded_by` 0.519→0.696 |
+| re-ko-aug-v12 | 0.6274 | removed 721 unsupported P112 rows — `founded_by` 0.519→0.696 |
+| **re-ko-hard-v13c (current)** | **0.6169** | mixed in a 748-row adjudicated hard set — **field precision 43.1→51.8%** (fresh blind holdout); KLUE −1.05pt accepted by panel. Known regression: `per:colleagues` |
+| re-ko-large-v1 (opt-in) | **0.6726** | klue/roberta-large 337M (fp16) — `quality-large` profile, field precision 70.6%, build ~2.2× |
 
 `eval/relation/MODEL_LOCK.json` is the single source of truth for the adopted build
 (release_tag·sha256 pinned).
-⚠️ The model is still **small** — below the official base 0.6666 / large 0.6959, so
-**size upgrade remains an unspent lever** (achievable without any LLM).
+⚠️ The **default** model is still **small** — below the official base 0.6666 / large 0.6959.
+The size upgrade was already tested and **parked** in the 0724 scaling round (`quality-large`
+opt-in 0.6726; default rollout rejected for exceeding the +30% build-cost cap).
 
 - **Invariant**: if any of env-unset·extras-not-installed·bad-path·no-NER holds, it falls
   back to rule-based particle SVO. "It does not turn on unless installed·configured." The
@@ -259,6 +284,40 @@ XGEN is the internal product that consumes this library. The following is its wi
 `ExtractorFactory` replicates XGEN's existing `RerankerFactory` pattern
 (PROVIDER_NAMES + importlib + config).
 
+## Ontology harness (v0.16, `harness/` — measurement/experiments, outside the package)
+
+Measures whether an ontokit graph **beats vector search on enumeration·aggregation·inverse-relation·
+multi-hop questions** on one fixed benchmark. The same query plan runs as SPARQL (Fuseki) and
+Cypher (Neo4j) on top of graphstore (swappable store backend).
+
+```
+question → planner (local LLM, IR JSON) → compiler (IR → SPARQL / Cypher)
+         → graphstore create_store(Fuseki RDF | Neo4j LPG) → scoring (vector upper bound · controls · bootstrap)
+```
+
+- **Queries use ontology semantics**: subclass closure (`rdf:type/rdfs:subClassOf*`), inverse-relation UNION, alias linking
+- **Benchmark**: 3,000 Korean Wikipedia leads + gold = **Wikidata facts actually stated in the text** (tool-independent);
+  210 questions in 7 forms, deterministic + hash-pinned. Vector search is scored at its **upper bound** (favours vector)
+- **Controls**: oracle graph (positive) · placebo (negative, bijective shuffle); valid run = oracle ≥ 0.90, placebo ≤ 0.15
+- **Schema-discovery mode** (`harness/discover.py`): plans over an existing store's real predicates — attaches to XGEN product graphs
+
+**Results (mean over 180 structural questions, max 1.0)**
+
+| Graph | Score | vs vector upper bound V40 (0.162) [95% CI] |
+|---|---|---|
+| gold graph + real planner | **0.879** | **+0.717 [+0.652, +0.779]** |
+| ontokit — round 1 (v0.15 defaults + encoder) | 0.018 | −0.144 |
+| ontokit — round 5 (v0.16 opt-ins + definitional channel) | **0.128** | −0.033 [−0.086, +0.019] |
+| current XGEN product graph (same docs) | 0.040 | −0.121 |
+
+- **The harness is validated**: a correct graph beats vector search by a wide margin. RDF·LPG parity 210/210 (3 graphs).
+- **ontokit does not yet beat the vector upper bound**: 7× improvement over five rounds (relation-fact recall 1.6→16.7%,
+  type 4.8→11.5%) but short of the pre-declared +0.15 → **hypothesis H1 (win with LLM-free extraction) failed**.
+- Round 6 onward tests H2 (local-LLM schema-guided extraction, zero external API).
+- ⚠️ The definitional channel is encyclopedic-register only; do not generalize Wikipedia results to other registers.
+
+Per-round pre-declarations, results and what was *not* measured: [`harness/docs/`](harness/docs/) (Korean).
+
 ## Structure
 ```
 src/ontokit/
@@ -270,12 +329,16 @@ src/ontokit/
 ├── hierarchy/            # suffix_share (main engine, ko=char/en=word), hearst_ko (definitional, off by default v0.14~)
 ├── instance_typing/      # occupation (P106 lexicon, on by default) + evidence + hygiene (v0.13)
 ├── ner/                  # koelectra (ko) + english (dslim BERT MIT) + ensemble·span_align
+│                         #   word_boundary·suffix_fragment (experimental, off)
 ├── dedup/                # deterministic (morphology) + synonym_dict (Urimalsaem, opt-in)
 │                         #   class_synonyms (TBox candidate proposal — no merge, offline review)
 ├── citations.py          # doc-level :cites citation collection·SPARQL emit (v0.8)
 ├── filter/               # class_promotion — termhood promotion gate (v0.9)
+│                         #   concept_gate — P279 concept gate (off, parked)
 ├── cooccurrence.py       # coOccursWith co-occurrence weak relation — density boost (v0.10)
 └── search/               # improvements (subClassOf*, floor guard) — ⚠️XGEN-specific
+
+harness/                  # ontology harness — outside the package (not installed); see below
 ```
 
 ## Quality evidence — only what you can reproduce
@@ -286,7 +349,7 @@ external-gold 0.33**. Everything below is reproducible from within this repo.
 
 | Axis | External gold | License | Result | Reproduce |
 |---|---|---|---|---|
-| **Relation** | KLUE-RE (official validation 7,765) | CC BY-SA 4.0 | holdout micro-F1 **0.6274** | [`eval/relation/`](eval/relation/) |
+| **Relation** | KLUE-RE (official validation 7,765) | CC BY-SA 4.0 | holdout micro-F1 **0.6169** (current v13c · v12 0.6274 · large 0.6726) | [`eval/relation/`](eval/relation/) |
 | **Hierarchy** | Wikidata P279 + Korean Wikipedia lead | CC0 | ⚠️ see caveat below | [`eval/hierarchy/`](eval/hierarchy/) |
 | **Entity resolution (ER)** | Korean Wikipedia redirects | CC BY-SA 4.0 | balanced F1 **0.776** — **below** the 0.80 gate | [`eval/entity_resolution/`](eval/entity_resolution/) |
 | Fine-grained typing | (self-measured) | — | **discarded** — 0.16% retyped, no effect | [`eval/instance_typing/`](eval/instance_typing/) |
@@ -319,7 +382,7 @@ python eval_encoder.py holdout
   R0 26/100 and "R1 in progress"; the artifacts backing 89/100 have **not landed yet**.
 - **Every "NN/100 judge" score comes from an in-repo judge loop** (protocols in
   `eval/*/JUDGE_PROTOCOL.md`), not external re-scoring. Only two numbers are anchored
-  directly to external gold: relation holdout (0.6274) and ER (0.776).
+  directly to external gold: relation holdout (0.6169, v13c) and ER (0.776).
 - **ER is not shipped.** Embeddings cannot separate synonymy from topical proximity
   (AUC ceiling ~0.81), so it missed the gate and was deliberately left unwired. Default dedup
   is morphology-based; dictionary merging is opt-in via `ONTOKIT_SYNONYM_DICT`.
@@ -330,7 +393,9 @@ python eval_encoder.py holdout
 The repo is public, so it installs **without authentication**:
 
 ```bash
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.15.0"
+pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
 ```
+⚠️ The latest tag on the remote is currently **v0.13.1** (v0.14.0–v0.16.0 tags not pushed). Until the tag
+is pushed the command above fails — pin a commit SHA instead (`...xgen-ontokit.git@<commit>`).
 Pinning is recommended — on-by-default channels have changed across minor versions (see the
 behavior-change notes above). Add the URL to your `pyproject.toml` dependencies or requirements.
