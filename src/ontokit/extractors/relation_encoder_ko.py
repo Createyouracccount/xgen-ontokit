@@ -227,6 +227,54 @@ def _mark(sentence: str, s_word: str, s_type: str, o_word: str, o_type: str) -> 
     return out
 
 
+# ── 위치 서술 관계 채널 (opt-in ONTOKIT_LOC_REL=1, LLM 0) ──
+# 문서 주제 개체 T 에 대해, T 의 문장(첫 문장 + T 가 나오는 문장) 안 NER 지역 개체 Y 가
+#   ⓐ "Y의 …"  ⓑ "Y에 있는/위치한/소재한"  ⓒ "Y (동|서|남|북|중)…부"
+# 로 서술되면: T 가 인물이면 per:origin(Y), 아니면 loc:located_in(Y)·loc:country(Y).
+# 국가/행정구역은 텍스트만으로 못 가르므로 둘 다 낸다(질문 상수가 대상을 가른다는 가정 — 측정 대상).
+_LOC_NON_TOPIC = frozenset({"날짜", "시간", "수량"})
+_LOC_TAIL = r"(?:의\s|에\s*(?:있|위치|소재)|\s*[동서남북중]{1,2}부)"
+
+
+def _loc_topic(entities: list[dict], first: str) -> Optional[tuple]:
+    best = None
+    for e in entities:
+        w, c = e.get("entity"), e.get("class", "") or ""
+        if not w or c in _LOC_NON_TOPIC:
+            continue
+        i = first.find(w)
+        if i >= 0 and (best is None or i < best[0]):
+            best = (i, w, c)
+    return (best[1], best[2]) if best else None
+
+
+def location_relations(entities: list[dict], sentences: list[str], *,
+                       source_chunks: list[str]) -> list[dict]:
+    if not sentences:
+        return []
+    topic = _loc_topic(entities, sentences[0])
+    if topic is None:
+        return []
+    tw, tc = topic
+    places = {e["entity"] for e in entities if e.get("entity") and e.get("class") == "지역"
+              and e["entity"] != tw and e["entity"] not in tw}
+    preds = ("per:origin",) if tc == "인물" else ("loc:located_in", "loc:country")
+    out, seen = [], set()
+    for k, sent in enumerate(sentences):
+        if k > 0 and tw not in sent:
+            continue
+        for y in places:
+            if y in sent and re.search(re.escape(y) + _LOC_TAIL, sent):
+                for p in preds:
+                    if (p, y) in seen:
+                        continue
+                    seen.add((p, y))
+                    out.append({"subject": tw, "predicate": p, "object": y,
+                                "predicate_type": "ObjectProperty", "source_chunks": source_chunks,
+                                "relation_label": p, "score": 1.0, "channel": "loc_rule"})
+    return out
+
+
 class KoreanRelationEncoder:
     """KLUE-RE 파인튜닝 인코더 관계 채널. 지연 로드(사용 안 하면 안 깔림).
 
@@ -281,6 +329,9 @@ class KoreanRelationEncoder:
         except ValueError:
             self._sent_cap = 0
         self._topic_subject = os.getenv("ONTOKIT_RE_TOPIC_SUBJECT", "0") == "1"
+        #  ONTOKIT_LOC_REL=1 : 위치 서술 관계 채널(아래 location_relations). KLUE-RE 에 위치 관계가
+        #    없어 위치 사실(위키 정답의 49%)이 0 이던 것(하네스 3차 손실 분해).
+        self._loc_rel = os.getenv("ONTOKIT_LOC_REL", "0") == "1"
 
     def warmup(self):
         """모델을 즉시 로드(지연 로드 강제 트리거). 경로 오류·extras 미설치를
@@ -425,4 +476,6 @@ class KoreanRelationEncoder:
         # 관측성(설계 검증 게이트) — 채널별 컷 카운트. 재빌드 감사에서 게이트 발화 재현용.
         if any(cuts.values()):
             logger.info("[rel-gate] cuts=%s kept=%d", cuts, len(out))
+        if getattr(self, "_loc_rel", False):
+            out += location_relations(ents, sentences, source_chunks=source_chunks)
         return out

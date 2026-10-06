@@ -136,3 +136,17 @@ def test_sentence_cap_keeps_later_sentences():
     assert not any(p[0] == "홍길동" for p in enc._pairs(many + late, sents))   # 청크 상한 60 소진
     enc._sent_cap = 20
     assert any(p[0] == "홍길동" and p[2] == "한양" for p in enc._pairs(many + late, sents))
+
+
+def test_location_relations_channel():
+    # 하네스 4차: 위치 서술(ⓐ의 ⓑ에 있는 ⓒ방위부) → 장소 주제는 loc:*, 인물 주제는 per:origin
+    from ontokit.extractors.relation_encoder_ko import location_relations
+    ents = [{"entity": "종묘", "class": "인공물"}, {"entity": "서울특별시", "class": "지역"},
+            {"entity": "종로구", "class": "지역"}]
+    rels = location_relations(ents, ["종묘는 서울특별시 종로구에 있는 사당이다."], source_chunks=["c"])
+    assert {(r["predicate"], r["object"]) for r in rels} == {("loc:located_in", "종로구"), ("loc:country", "종로구")}
+    ents2 = [{"entity": "김철수", "class": "인물"}, {"entity": "미국", "class": "지역"}]
+    rels2 = location_relations(ents2, ["김철수는 미국의 배우이다."], source_chunks=["c"])
+    assert [(r["predicate"], r["object"]) for r in rels2] == [("per:origin", "미국")]
+    # 패턴 밖 언급은 내지 않는다
+    assert location_relations(ents2, ["김철수는 미국과 협상했다."], source_chunks=["c"]) == []

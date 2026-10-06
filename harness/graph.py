@@ -92,6 +92,8 @@ KLUE_MAP = {
     "org:founded_by": ("rel", "org:founded_by"),
     "org:place_of_headquarters": ("rel", "org:place_of_headquarters"),
     "org:top_members/employees": ("inv", "per:employee_of"),   # 조직→인물 = 인물 소속의 역
+    "loc:located_in": ("rel", "loc:located_in"),   # ontokit 위치 서술 채널(4차, opt-in)
+    "loc:country": ("rel", "loc:country"),
     "per:title": ("type", None),          # KLUE per:title = 직업·직위 → 타입으로
     "per:alternate_names": ("alias", None),
     "org:alternate_names": ("alias", None),
