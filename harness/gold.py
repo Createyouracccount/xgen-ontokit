@@ -392,6 +392,7 @@ def export_facts(f):
 
 def main():
     docs_path, wd, out = sys.argv[1], sys.argv[2], sys.argv[3]
+    name = sys.argv[4] if len(sys.argv) > 4 else "wiki2"   # 출력 접두(홀드아웃은 wikiH)
     docs = [json.loads(l) for l in open(docs_path)]
     subjects = json.load(open(os.path.join(wd, "subjects.json")))
     objects = json.load(open(os.path.join(wd, "objects.json")))
@@ -399,8 +400,8 @@ def main():
     qs = build(f)
     os.makedirs(out, exist_ok=True)
     blob = json.dumps(qs, ensure_ascii=False, indent=1)
-    open(os.path.join(out, "wiki2_bench.json"), "w").write(blob)
-    json.dump(export_facts(f), open(os.path.join(out, "wiki2_oracle_facts.json"), "w"), ensure_ascii=False)
+    open(os.path.join(out, f"{name}_bench.json"), "w").write(blob)
+    json.dump(export_facts(f), open(os.path.join(out, f"{name}_oracle_facts.json"), "w"), ensure_ascii=False)
     sha = hashlib.sha256(blob.encode()).hexdigest()[:16]
     forms = collections.Counter(q["form"] for q in qs)
     print(f"subjects={sum(1 for e in f.ent.values() if e['subject'])} rel_facts="
