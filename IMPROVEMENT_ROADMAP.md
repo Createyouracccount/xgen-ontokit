@@ -56,7 +56,7 @@ enable_qdt_gate = True
 | 엔티티(인스턴스) | KoELECTRA/EnglishNER | ✅ 주입 시 |
 | 인스턴스 타이핑 | 직업 P106 어휘집(`instance_typing`) | ✅ **기본 on (0719, 신규)** |
 | 관계(objectProperty) | 조사 기반 SVO(`relation_ko`) | ✅ 기본 on — **가용성 폴백 전용**으로 지위 확정 |
-| 관계 — 인코더 | KLUE-RE+SREDFM 증강(`relation_encoder_ko`) | ⚙️ **env opt-in (신규)** holdout 0.6274 |
+| 관계 — 인코더 | KLUE-RE+SREDFM 증강(`relation_encoder_ko`) | ⚙️ **env opt-in** holdout 0.6169(현행 v13c; v12 0.6274) |
 | 관계 — 약관계 | `coOccursWith`(`cooccurrence`) | ⚙️ **소비측 배선 (신규)** |
 | 관계 — 영어 | spaCy 의존 SVO(`relation_en`) | ⚙️ **env opt-in (신규)** |
 | 클래스 승격 필터 | termhood 게이트(`filter/class_promotion`) | ✅ **(0712, 신규)** |
@@ -77,7 +77,7 @@ env opt-in, 기본 on 인 직업 타이핑도 패키지 동봉 어휘집만 읽�
 
 **1. Hearst 정의문 계층 배선** (기법 19) — ✅ **완료(v0.12)**
 - 0710 현황(당시): `hierarchy/hearst_ko.py`에 `definitional_pairs()` **구현돼 있으나 호출처 0**(미배선).
-- **0720 결과**: `deterministic_ko.py:305` 배선, `enable_hearst=True` 기본 on.
+- **0720 결과**: `deterministic_ko.py:342` 배선, `enable_hearst=True` 기본 on.
   ABox↔TBox 브리지(`assign_definitional_types`) 추가로 계층 도달률 0% 결함 수복.
   ⚠️ 아래 예상 수치(정밀도 89.7% 계열)는 당시 문헌 근거였고, 실제 채택 라운드의
   자체 실측은 615건·정밀도 87%다 — **재현 산출물은 `eval/hierarchy/` 에 미랜딩**.
@@ -159,11 +159,11 @@ Tier 1 종결 후 재산정. **전부 LLM 없이 가능한 것부터** 정렬했
 - **계층 축 재현 산출물 미랜딩**: 89/100·정의문 615건·정밀도 87% 는 자체 심판과
   커밋 메시지에만 있고 `eval/hierarchy/` 결과 로그에는 R0 26/100·"R1 진행 중"뿐이다.
   → `eval/hierarchy/` 하네스로 R1 을 실제 재실행해 수치를 랜딩할 것.
-- **외부 gold 앵커는 관계(0.6274)·ER(0.776) 둘뿐**. 나머지 "NN/100" 은 전부 자체 심판.
+- **외부 gold 앵커는 관계(0.6169, v13c)·ER(0.776) 둘뿐**. 나머지 "NN/100" 은 전부 자체 심판.
   외부 재채점이 아님을 문서에 명시했으나(README), 근본 해소는 재현 하네스 정비다.
 
 ### 2순위 — 관계 인코더 모델 크기 (LLM-free, 효과 최대)
-현재 채택본은 **klue/roberta-small** 계열 증강본(holdout 0.6274). KLUE 공식 baseline 은
+현재 채택본은 **klue/roberta-small** 계열 하드셋 혼합본 v13c(holdout 0.6169; 직전 v12 0.6274). KLUE 공식 baseline 은
 small 0.6085 / base 0.6666 / **large 0.6959** 다.
 - → **base·large 로 올리는 것만으로 +3~7pp** 가 남아 있다. 증강(+3.5pp)은 이미 소진했고,
   크기 상향은 ~~**미소진 레버**~~ 였다. 비용은 추론 시간·메모리(로컬 CPU 추론 전제 재검토 필요).
