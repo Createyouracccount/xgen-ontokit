@@ -30,3 +30,4 @@ eval/relation/model_re_v15*/
 eval/relation/*.tar.gz
 eval/relation/model_re_scale_large_onnx*/
 eval/relation/v1[45]_*.log
+harness/data/
