@@ -12,6 +12,13 @@ from harness import schema as S
 from harness.graph import KLUE_MAP
 
 
+def _in(d, which):
+    """which: "all" | "dev" | "eval" | 문서 id 집합."""
+    if isinstance(which, (set, frozenset)):
+        return d in which
+    return which == "all" or split_of(d) == which
+
+
 def split_of(doc_id):
     return "dev" if int(hashlib.md5(doc_id.encode()).hexdigest(), 16) % 6 == 0 else "eval"
 
@@ -28,7 +35,7 @@ def recall(raw, facts, which="all"):
         sk, ok = S.norm(r["subject"]), S.norm(r["object"])
         for c in r.get("source_chunks", []):
             d = c.split("#")[0]
-            if which != "all" and split_of(d) != which:
+            if not _in(d, which):
                 continue
             n_rel += 1
             if m and m[0] == "rel":
@@ -39,7 +46,7 @@ def recall(raw, facts, which="all"):
     for f in facts["relations"]:
         s, p, o = f["s"], f["p"], f["o"]
         for d in E[s]["docs"]:
-            if which != "all" and split_of(d) != which:
+            if not _in(d, which):
                 continue
             st[p]["facts"] += 1
             st[p]["hit"] += any(p in pair.get((d, a, b), ()) for a in keys(s) for b in keys(o))

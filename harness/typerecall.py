@@ -9,7 +9,14 @@ import re
 import sys
 
 from harness import schema as S
-from harness.relrecall import split_of
+from harness.relrecall import split_of, _in
+
+
+def _in(d, which):
+    """which: "all" | "dev" | "eval" | 문서 id 집합."""
+    if isinstance(which, (set, frozenset)):
+        return d in which
+    return which == "all" or split_of(d) == which
 
 
 def type_recall(raw, facts, which="all"):
@@ -38,7 +45,7 @@ def type_recall(raw, facts, which="all"):
     st = collections.Counter()
     for s, ts in facts["types"].items():
         for d in E[s]["docs"]:
-            if which != "all" and split_of(d) != which:
+            if not _in(d, which):
                 continue
             got = set()
             for n in E[s]["names"]:
