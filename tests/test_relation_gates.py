@@ -114,3 +114,48 @@ def test_min_score_env_rejects_nonfinite(monkeypatch, bad):
     # 무력화. nan/inf/음수는 거부하고 기본값 폴백해야 한다.
     monkeypatch.setenv("ONTOKIT_RELATION_CONF_MIN", bad)
     assert KoreanRelationEncoder(model="dummy")._min_score == DEFAULT_MIN_SCORE
+
+
+def test_topic_subject_restores_zero_anaphora():
+    # 하네스 2차: 주제 개체가 없는 문장에 영주어를 복원해 (주제, 개체) 쌍을 만든다(opt-in).
+    enc = KoreanRelationEncoder.__new__(KoreanRelationEncoder)
+    ents = [{"entity": "김철수", "class": "인물"}, {"entity": "서울", "class": "지역"}]
+    sents = ["김철수는 대한민국의 배우이다.", "서울에서 태어났다."]
+    assert enc._pairs(ents, sents) == []          # 기본(off): 문장 밖 쌍 없음
+    enc._topic_subject, enc._sent_cap = True, 0
+    pairs = enc._pairs(ents, sents)
+    assert [(p[0], p[2], p[6]) for p in pairs] == [("김철수", "서울", "김철수는 서울에서 태어났다.")]
+
+
+def test_sentence_cap_keeps_later_sentences():
+    # 하네스 2차: 문장당 상한이면 앞 문장이 청크 상한(60)을 독식하지 않는다.
+    enc = KoreanRelationEncoder.__new__(KoreanRelationEncoder)
+    many = [{"entity": f"기관{i}", "class": "기관"} for i in range(12)]
+    late = [{"entity": "홍길동", "class": "인물"}, {"entity": "한양", "class": "지역"}]
+    sents = [" ".join(e["entity"] for e in many), "홍길동 한양 출생."]
+    assert not any(p[0] == "홍길동" for p in enc._pairs(many + late, sents))   # 청크 상한 60 소진
+    enc._sent_cap = 20
+    assert any(p[0] == "홍길동" and p[2] == "한양" for p in enc._pairs(many + late, sents))
+
+
+def test_location_relations_channel():
+    # 하네스 4차: 위치 서술(ⓐ의 ⓑ에 있는 ⓒ방위부) → 장소 주제는 loc:*, 인물 주제는 per:origin
+    from ontokit.extractors.relation_encoder_ko import location_relations
+    ents = [{"entity": "종묘", "class": "인공물"}, {"entity": "서울특별시", "class": "지역"},
+            {"entity": "종로구", "class": "지역"}]
+    rels = location_relations(ents, ["종묘는 서울특별시 종로구에 있는 사당이다."], source_chunks=["c"])
+    assert {(r["predicate"], r["object"]) for r in rels} == {("loc:located_in", "종로구"), ("loc:country", "종로구")}
+    ents2 = [{"entity": "김철수", "class": "인물"}, {"entity": "미국", "class": "지역"}]
+    rels2 = location_relations(ents2, ["김철수는 미국의 배우이다."], source_chunks=["c"])
+    assert [(r["predicate"], r["object"]) for r in rels2] == [("per:origin", "미국")]
+    # 패턴 밖 언급은 내지 않는다
+    assert location_relations(ents2, ["김철수는 미국과 협상했다."], source_chunks=["c"]) == []
+
+
+def test_suffix_org_candidates():
+    # 하네스 5차: NER 미포착 기관 접미 명사구 보충(조사 분리·NER 중복 제외)
+    from ontokit.extractors.relation_encoder_ko import suffix_org_candidates
+    sents = ["그는 매사추세츠 공과대학교를 졸업하고 삼성전자에 입사했다.", "고려대학교에서 박사 학위를 받았다."]
+    got = {c["entity"] for c in suffix_org_candidates(sents, [{"entity": "삼성전자"}])}
+    assert got == {"매사추세츠 공과대학교", "고려대학교"}
+    assert suffix_org_candidates(["고려대학교에서 강의했다."], [{"entity": "고려대학교"}]) == []

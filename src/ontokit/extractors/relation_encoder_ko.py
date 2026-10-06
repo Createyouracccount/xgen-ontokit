@@ -63,6 +63,8 @@ _SUBJ_TYPES = frozenset({"PER", "ORG"})
 # "상한 삭감=관계 -26%" 실측은 청크 전조합 시절 수치로, 문장 스코프에서는 상한 도달
 # 자체가 드묾. 상한 의미는 이제 병리적 밀집 문장 보호용 안전핀. 60 유지(청크당).
 MAX_PAIRS_PER_CHUNK = 60
+# 문장당 상한 모드의 청크 안전핀(병리적 초장문 청크 보호).
+MAX_PAIRS_SAFETY = 600
 # 인코더 forward 배치 크기 — self._pipe 에 미지정 시 HF 는 1건씩 순차 추론(CPU 손해).
 # NER(entities_batch=32)과 동일하게 배치화. mixed20k 실측: 밀집청크 batch=1 82.6초→
 # batch=32 40.0초(2.07배), 관계 결과 불변. 상한 삭감(관계 손실) 대신 이걸로 속도 확보.
@@ -190,6 +192,14 @@ def _gate(label: str, s_cls: str, o_cls: str, obj_surface: str, sentence: str) -
     return None
 
 
+def _topic_josa(word: str) -> str:
+    """주제 접두 조사 — 받침 있으면 '은', 없으면(또는 비한글) '는'."""
+    ch = word[-1] if word else ""
+    if "가" <= ch <= "힣":
+        return "은" if (ord(ch) - 0xAC00) % 28 else "는"
+    return "는"
+
+
 def _klue_type(cls: str) -> str:
     return _CLASS_TO_KLUE_TYPE.get(cls, "POH")
 
@@ -214,6 +224,90 @@ def _mark(sentence: str, s_word: str, s_type: str, o_word: str, o_type: str) -> 
     out = sentence
     for st, en, opn, cls in spans:
         out = out[:st] + f" {opn} " + out[st:en + 1] + f" {cls} " + out[en + 1:]
+    return out
+
+
+# ── 위치 서술 관계 채널 (opt-in ONTOKIT_LOC_REL=1, LLM 0) ──
+# 문서 주제 개체 T 에 대해, T 의 문장(첫 문장 + T 가 나오는 문장) 안 NER 지역 개체 Y 가
+#   ⓐ "Y의 …"  ⓑ "Y에 있는/위치한/소재한"  ⓒ "Y (동|서|남|북|중)…부"
+# 로 서술되면: T 가 인물이면 per:origin(Y), 아니면 loc:located_in(Y)·loc:country(Y).
+# 국가/행정구역은 텍스트만으로 못 가르므로 둘 다 낸다(질문 상수가 대상을 가른다는 가정 — 측정 대상).
+_LOC_NON_TOPIC = frozenset({"날짜", "시간", "수량"})
+_LOC_TAIL = r"(?:의\s|에\s*(?:있|위치|소재)|\s*[동서남북중]{1,2}부)"
+
+
+def _loc_topic(entities: list[dict], first: str) -> Optional[tuple]:
+    best = None
+    for e in entities:
+        w, c = e.get("entity"), e.get("class", "") or ""
+        if not w or c in _LOC_NON_TOPIC:
+            continue
+        i = first.find(w)
+        if i >= 0 and (best is None or i < best[0]):
+            best = (i, w, c)
+    return (best[1], best[2]) if best else None
+
+
+def location_relations(entities: list[dict], sentences: list[str], *,
+                       source_chunks: list[str]) -> list[dict]:
+    if not sentences:
+        return []
+    topic = _loc_topic(entities, sentences[0])
+    if topic is None:
+        return []
+    tw, tc = topic
+    places = {e["entity"] for e in entities if e.get("entity") and e.get("class") == "지역"
+              and e["entity"] != tw and e["entity"] not in tw}
+    preds = ("per:origin",) if tc == "인물" else ("loc:located_in", "loc:country")
+    out, seen = [], set()
+    for k, sent in enumerate(sentences):
+        if k > 0 and tw not in sent:
+            continue
+        for y in places:
+            if y in sent and re.search(re.escape(y) + _LOC_TAIL, sent):
+                for p in preds:
+                    if (p, y) in seen:
+                        continue
+                    seen.add((p, y))
+                    out.append({"subject": tw, "predicate": p, "object": y,
+                                "predicate_type": "ObjectProperty", "source_chunks": source_chunks,
+                                "relation_label": p, "score": 1.0, "channel": "loc_rule"})
+    return out
+
+
+# ── 기관 접미 명사구 후보 (opt-in ONTOKIT_RE_SUFFIX_ORG=1) ──
+_ORG_SUFFIX = ("대학교", "대학원", "대학", "고등학교", "중학교", "학교", "학원", "회사", "그룹", "은행",
+               "구단", "클럽", "정당", "협회", "위원회", "연구소", "연구원", "병원", "재단", "공사")
+_JOSA_END = ("은", "는", "이", "가", "을", "를", "에", "의", "로", "와", "과", "도", "서", "며", "고", "다")
+_TOKEN = re.compile(r"[가-힣A-Za-z0-9]+")
+
+
+def suffix_org_candidates(sentences: list[str], entities: list[dict]) -> list[dict]:
+    """문장 안 1~3어절 명사구 중 기관 접미로 끝나는 것을 NER 미포착분만 '기관' 으로.
+    마지막 어절이 접미로 끝나야 하고(조사가 붙은 어절은 조사 앞까지), 앞 어절이 조사로
+    끝나면 거기서 끊는다. 이미 NER 개체와 겹치는 표면형은 내지 않는다."""
+    have = [e.get("entity") or "" for e in entities]
+    out, seen = [], set()
+    for sent in sentences:
+        toks = [(m.group(), m.start()) for m in _TOKEN.finditer(sent)]
+        for i, (t, _) in enumerate(toks):
+            core = next((t[:len(t) - len(j)] for j in ("에서", "으로", "에") + _JOSA_END
+                         if t.endswith(j) and t[:len(t) - len(j)].endswith(_ORG_SUFFIX)), t)
+            if not core.endswith(_ORG_SUFFIX) or core in _ORG_SUFFIX:
+                continue
+            words = [core]
+            for k in range(i - 1, max(-1, i - 3), -1):
+                w = toks[k][0]
+                if w.endswith(_JOSA_END) or w.isdigit():
+                    break
+                words.insert(0, w)
+            surf = " ".join(words)
+            if surf not in sent:   # 어절 사이가 공백 하나가 아니면 원문 표면형을 못 만든다
+                surf = core
+            if surf in seen or any(surf in h or h in surf for h in have if h):
+                continue
+            seen.add(surf)
+            out.append({"entity": surf, "class": "기관", "type": "INSTANCE", "channel": "suffix_org"})
     return out
 
 
@@ -260,6 +354,23 @@ class KoreanRelationEncoder:
                         raw, DEFAULT_MIN_SCORE)
         self._min_score = min_score
         self._lock = threading.Lock()
+        # 온톨로지 하네스 2차(opt-in, 기본 off — 기본 경로 불변). 생성 시점에 읽는다
+        # (모듈 import 시점 읽기는 같은 프로세스 A/B 를 깨뜨린다 — 0910 감사 지적).
+        #  ONTOKIT_RE_MAX_PAIRS_PER_SENT=N : 쌍 상한을 청크(60) 대신 문장당 N 으로. 긴 청크에서
+        #    앞 1~2문장이 상한을 독식해 뒤 문장(출생·학력·소속)이 후보조차 못 되던 것(wiki2 실측).
+        #  ONTOKIT_RE_TOPIC_SUBJECT=1 : 문서 주제 개체(첫 문장 최선두 PER/ORG)를 그 개체가 없는
+        #    문장의 영주어로 복원("주제는 …" 접두) — 한국어 주어 생략("…에서 태어났다") 대응.
+        try:
+            self._sent_cap = max(0, int(os.getenv("ONTOKIT_RE_MAX_PAIRS_PER_SENT", "0")))
+        except ValueError:
+            self._sent_cap = 0
+        self._topic_subject = os.getenv("ONTOKIT_RE_TOPIC_SUBJECT", "0") == "1"
+        #  ONTOKIT_LOC_REL=1 : 위치 서술 관계 채널(아래 location_relations). KLUE-RE 에 위치 관계가
+        #    없어 위치 사실(위키 정답의 49%)이 0 이던 것(하네스 3차 손실 분해).
+        self._loc_rel = os.getenv("ONTOKIT_LOC_REL", "0") == "1"
+        #  ONTOKIT_RE_SUFFIX_ORG=1 : NER 이 놓친 기관 접미 명사구('…대학교'·'…회사')를 '기관' 후보로 보충
+        #    (하네스 4차 분해: 출신학교 목적어 누락 41/48 이 이 형태).
+        self._suffix_org = os.getenv("ONTOKIT_RE_SUFFIX_ORG", "0") == "1"
 
     def warmup(self):
         """모델을 즉시 로드(지연 로드 강제 트리거). 경로 오류·extras 미설치를
@@ -283,7 +394,8 @@ class KoreanRelationEncoder:
         인코더에 던져 고확신 날조를 양산했다(ui_news100 실측: FABRICATED 66%가
         문장 경계 밖 쌍). 같은 문장에 동시 출현하는 쌍만 후보로 생성하고, 마킹
         입력도 그 문장으로 한다. subj∈{PER,ORG}(학습 마커 분포 유지 — 지역 주어
-        허용은 게이트 계약에만 명시, 쌍 미생성이라 실발화 없음). 상한은 청크당.
+        허용은 게이트 계약에만 명시, 쌍 미생성이라 실발화 없음). 상한은 청크당
+        (ONTOKIT_RE_MAX_PAIRS_PER_SENT 지정 시 문장당).
         반환: (sw, stype, ow, otype, s_cls, o_cls, sentence)"""
         typed = []
         seen_e = set()
@@ -293,9 +405,18 @@ class KoreanRelationEncoder:
                 continue
             seen_e.add(w)
             typed.append((w, e.get("class", "") or ""))
+        sent_cap = getattr(self, "_sent_cap", 0)  # __new__ 로 만든 객체(테스트) 하위호환
+        topic = self._topic(typed, sentences) if getattr(self, "_topic_subject", False) else None
         pairs = []
         for sent in sentences:
             within = [(w, c) for w, c in typed if w in sent]
+            cand = []
+            if topic and topic[0] not in sent:
+                # 영주어 복원: 주제 개체를 주어로 접두한 문장에서 (주제, 문장 내 개체) 쌍
+                aug = f"{topic[0]}{_topic_josa(topic[0])} {sent}"
+                tt = _klue_type(topic[1])
+                cand += [(topic[0], tt, ow, _klue_type(o_cls), topic[1], o_cls, aug)
+                         for ow, o_cls in within if ow != topic[0] and ow not in topic[0]]
             for i, (sw, s_cls) in enumerate(within):
                 stype = _klue_type(s_cls)
                 if stype not in _SUBJ_TYPES:
@@ -303,10 +424,32 @@ class KoreanRelationEncoder:
                 for j, (ow, o_cls) in enumerate(within):
                     if i == j or sw == ow:
                         continue
-                    pairs.append((sw, stype, ow, _klue_type(o_cls), s_cls, o_cls, sent))
+                    cand.append((sw, stype, ow, _klue_type(o_cls), s_cls, o_cls, sent))
+            if sent_cap:
+                pairs += cand[:sent_cap]
+                if len(pairs) >= MAX_PAIRS_SAFETY:
+                    return pairs[:MAX_PAIRS_SAFETY]
+            else:
+                for c in cand:
+                    pairs.append(c)
                     if len(pairs) >= MAX_PAIRS_PER_CHUNK:
                         return pairs
         return pairs
+
+    @staticmethod
+    def _topic(typed: list[tuple], sentences: list[str]) -> Optional[tuple]:
+        """문서 주제 개체 — 첫 문장에서 가장 앞에 나오는 PER/ORG 개체(표제·정의문 주어)."""
+        if not sentences:
+            return None
+        first = sentences[0]
+        best = None
+        for w, c in typed:
+            if _klue_type(c) not in _SUBJ_TYPES:
+                continue
+            i = first.find(w)
+            if i >= 0 and (best is None or i < best[0]):
+                best = (i, w, c)
+        return (best[1], best[2]) if best else None
 
     def extract(self, text: str, *, source_chunks: list[str]) -> list[dict]:
         """청크 → 관계 dict 리스트(kg_builder 소비 스키마, 규칙 채널과 동일).
@@ -318,6 +461,8 @@ class KoreanRelationEncoder:
             return []
         ents = self._ner.entities(text, source_chunks=source_chunks)
         sentences = _split_sentences(text)
+        if getattr(self, "_suffix_org", False):
+            ents = list(ents) + suffix_org_candidates(sentences, ents)
         pairs = self._pairs(ents, sentences)
         if not pairs:
             return []
@@ -372,4 +517,6 @@ class KoreanRelationEncoder:
         # 관측성(설계 검증 게이트) — 채널별 컷 카운트. 재빌드 감사에서 게이트 발화 재현용.
         if any(cuts.values()):
             logger.info("[rel-gate] cuts=%s kept=%d", cuts, len(out))
+        if getattr(self, "_loc_rel", False):
+            out += location_relations(ents, sentences, source_chunks=source_chunks)
         return out
