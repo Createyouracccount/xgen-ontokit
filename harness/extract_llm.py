@@ -37,13 +37,14 @@ def ask(model, text, timeout=300):
 
 def parse_salvage(txt):
     """JSON 파싱 — 출력 상한에 잘린 경우 마지막으로 완결된 항목까지 살린다(잘린 꼬리만 버림).
-    복구 불가면 예외(0건으로 조용히 넘기지 않는다)."""
+    객체 배열(관계)과 문자열 배열(답 목록) 둘 다 처리. 복구 불가면 예외(0건으로 조용히 넘기지 않는다).
+    L1 에서 문자열 배열이 잘린 137건을 '복구 불가'로 0점 처리한 결함(VLLM 팔에 편중)을 고친 것."""
     try:
         return json.loads(txt)
     except json.JSONDecodeError:
         pass
     for i in range(len(txt) - 1, 0, -1):
-        if txt[i] != "}":
+        if txt[i] not in '}"]':
             continue
         for tail in ("]}", "}", "]}}", ""):
             try:
