@@ -15,7 +15,6 @@ import urllib.request
 
 from harness.schema import RELATIONS
 
-OLLAMA = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 _CAT = "\n".join(f"- {k}: {v[0]} — {v[1]}" for k, v in RELATIONS.items())
 PROMPT = f"""아래 문서의 주제(첫 줄의 표제)에 대해, **본문에 적혀 있는 사실만** JSON 으로 뽑아라.
@@ -32,11 +31,8 @@ PROMPT = f"""아래 문서의 주제(첫 줄의 표제)에 대해, **본문에 �
 
 
 def ask(model, text, timeout=300):
-    body = {"model": model, "prompt": PROMPT + text[:2000], "stream": False, "think": False,
-            "format": "json", "options": {"temperature": 0, "seed": 0, "num_ctx": 4096, "num_predict": 1024}}
-    req = urllib.request.Request(f"{OLLAMA}/api/generate", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    return parse_salvage(json.load(urllib.request.urlopen(req, timeout=timeout))["response"])
+    from harness.llm import generate_json
+    return generate_json(PROMPT + text[:2000], model=model, num_ctx=4096, max_tokens=1024, timeout=timeout)
 
 
 def parse_salvage(txt):
