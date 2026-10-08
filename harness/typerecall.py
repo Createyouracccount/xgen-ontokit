@@ -5,11 +5,10 @@
 """
 import collections
 import json
-import re
 import sys
 
 from harness import schema as S
-from harness.relrecall import split_of, _in
+from harness.relrecall import split_of
 
 
 def _in(d, which):

@@ -37,7 +37,15 @@ def read(q, hits, graph_items):
     prompt = (f"아래 자료만 근거로 질문에 답하라. 자료에 없는 것은 쓰지 마라. JSON 하나만 출력: {want}\n\n"
               f"{ctx}\n\n{gblock}질문: {q['q']}")
     from harness.llm import generate_json
-    return generate_json(prompt, model=os.getenv("HARNESS_READER_MODEL") or None, num_ctx=32768, max_tokens=1024)
+    raw = {}
+    try:
+        out = generate_json(prompt, model=os.getenv("HARNESS_READER_MODEL") or None, num_ctx=32768,
+                            max_tokens=1024, raw_out=raw)
+    except ValueError as e:      # 복구 불가 JSON 도 원문은 남긴다
+        e.raw = raw.get("text", "")
+        raise
+    out["_raw"] = raw.get("text", "")[:2000]   # 원문 보존 — 파서·채점 결함을 재판독 없이 재채점(L1 파서 사고 대응)
+    return out
 
 def score(q, a):
     names = [x for x in (a.get("answers") or []) if isinstance(x, str)]
@@ -46,6 +54,7 @@ def score(q, a):
         sc["count_pred"] = a.get("count")
         sc["score"] = 1.0 if a.get("count") == q["gold"]["count"] else 0.0
     sc["answers"] = names[:60]
+    sc["raw"] = a.get("_raw", "")
     return sc
 
 
@@ -98,7 +107,7 @@ async def main():
             except (urllib.error.URLError, ConnectionError, TimeoutError):
                 raise
             except Exception as e:
-                sc = {"score": 0.0, "err": str(e)[:160]}
+                sc = {"score": 0.0, "err": str(e)[:160], "raw": getattr(e, "raw", "")[:2000]}
             sc["graph_items"] = len(items)
             row["arms"][arm] = sc
         res["rows"] = list(rows.values())

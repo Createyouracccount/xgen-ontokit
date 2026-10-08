@@ -2355,3 +2355,24 @@ def test_r13_p31_is_never_used_for_instance_decision():
     src = inspect.getsource(m.is_concept)
     assert "p31" not in src.lower() or "taxon" in src.lower()
     assert "Q16521" in inspect.getsource(m)      # taxon 예외만 P31 을 쓴다
+
+
+def test_concept_gate_silent_noop_is_warned(monkeypatch, caplog):
+    """개념 게이트를 켰는데 스냅샷 경로가 없으면 조용히 무동작하던 것 — 빌드 로그에 경고로 올라와야 한다."""
+    import logging
+    _kiwi_or_skip()
+    import ontokit.filter.concept_gate as cg
+    from ontokit.extractors.deterministic_ko import DeterministicKoreanExtractor
+    monkeypatch.setattr(cg, "ENABLED", True)
+    monkeypatch.setattr(cg, "_SNAPSHOT_PATH", "")
+    monkeypatch.setattr(cg, "_SNAPSHOT", None)
+
+    class FakeNER:
+        def entities(self, text, *, source_chunks):
+            return [{"entity": "경제", "class": "용어", "type": "INSTANCE",
+                     "source_chunks": source_chunks, "start": 0, "end": 2}]
+    ex = DeterministicKoreanExtractor(ner=FakeNER(), enable_relations=False,
+                                      auto_english=False, enable_hearst=False)
+    with caplog.at_level(logging.WARNING, logger="ontokit.extractors.deterministic_ko"):
+        asyncio.run(ex.extract({"d": [{"chunk_id": "c", "chunk_text": "경제가 성장했다.", "chunk_index": 0}]}))
+    assert any("무동작" in r.getMessage() for r in caplog.records)

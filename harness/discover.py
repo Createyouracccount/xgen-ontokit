@@ -8,7 +8,6 @@ lotteimall-dev·develop 의 빌더는 술어를 자유롭게 만든다(xgen-doma
 
   python -m harness.discover catalog <dataset> <graph>
 """
-import asyncio
 import json
 import re
 import sys

@@ -16,7 +16,7 @@ def backend():
     return os.getenv("HARNESS_LLM", "ollama")
 
 
-def generate_json(prompt, *, model=None, num_ctx=4096, max_tokens=1024, timeout=900):
+def generate_json(prompt, *, model=None, num_ctx=4096, max_tokens=1024, timeout=900, raw_out=None):
     be = backend()
     if be == "ollama":
         model = model or os.getenv("HARNESS_LLM_MODEL", "qwen3:8b")
@@ -35,6 +35,8 @@ def generate_json(prompt, *, model=None, num_ctx=4096, max_tokens=1024, timeout=
         text = json.load(urllib.request.urlopen(req, timeout=timeout))["choices"][0]["message"]["content"]
     else:
         raise ValueError(f"알 수 없는 HARNESS_LLM={be}")
+    if raw_out is not None:
+        raw_out["text"] = text
     from harness.extract_llm import parse_salvage
     return parse_salvage(_strip(text))
 
