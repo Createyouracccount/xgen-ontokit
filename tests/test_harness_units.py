@@ -80,3 +80,16 @@ def test_guard_decide_hysteresis():
     assert acts == ["resume"] and not p
     acts, p = decide(5, False)             # 10 미만 → LLM 서버 회수 + 정지
     assert acts == ["kill", "pause"] and p
+
+
+def test_placebo_changes_every_fact():
+    # L01: 목적어가 겹치는 관계에서 위약이 사실을 그대로 남겨 음성 대조가 무너졌다
+    from harness.graph import placebo_facts
+    types = [("s1", ["역"]), ("s2", ["역"]), ("s3", ["산"]), ("s4", ["대학"])]
+    rels = [{"s": "s1", "p": "loc:located_in", "o": "구A"}, {"s": "s2", "p": "loc:located_in", "o": "구A"},
+            {"s": "s3", "p": "loc:located_in", "o": "구A"}, {"s": "s4", "p": "loc:located_in", "o": "구B"},
+            {"s": "s1", "p": "per:origin", "o": "나라X"}]
+    nt, nr = placebo_facts(types, rels)
+    orig = {(r["s"], r["p"], r["o"]) for r in rels}
+    assert len(nr) == len(rels) and not ({(r["s"], r["p"], r["o"]) for r in nr} & orig)
+    assert all(not (set(t) & set(dict(types)[s])) for s, t in nt)
