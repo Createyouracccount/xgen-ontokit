@@ -57,3 +57,26 @@ def test_evaluator_semantics_closure_alias_inverse():
     # 역관계: 부모(P22) 사실로 '자녀' 를 물을 수 있다
     assert set(ev.solve({"op": "list", "return": "y", "where": [
         {"t": "rel", "s": {"const": "이부모"}, "p": "per:children", "o": {"var": "y"}}]})) == {"Q2"}
+
+
+# ── 메모리 가드(OS 무관) ──
+from harness.guard import decide, parse_cgroup, parse_meminfo, parse_memory_pressure
+
+
+def test_guard_parsers_each_os():
+    assert round(parse_meminfo("MemTotal: 1000 kB\nMemFree: 100 kB\nMemAvailable: 250 kB\n")) == 25   # Linux
+    assert parse_cgroup("max", "123", 10**12) is None                                                 # 한도 없음 → 호스트 지표로
+    assert parse_cgroup("1000", "900", 10**12) == 10.0                                                # 컨테이너 한도 기준
+    assert parse_cgroup("2000", "100", 1000) is None                                                  # 한도 ≥ 호스트 = 무의미
+    assert parse_memory_pressure("System-wide memory free percentage: 33%") == 33.0                   # macOS
+
+
+def test_guard_decide_hysteresis():
+    acts, p = decide(15, False)            # 20 미만 → 정지
+    assert acts == ["pause"] and p
+    acts, p = decide(25, True)             # 20~30 사이 → 그대로(진동 방지)
+    assert acts == [] and p
+    acts, p = decide(35, True)             # 30 이상 → 재개
+    assert acts == ["resume"] and not p
+    acts, p = decide(5, False)             # 10 미만 → LLM 서버 회수 + 정지
+    assert acts == ["kill", "pause"] and p
