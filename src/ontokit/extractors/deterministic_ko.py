@@ -406,7 +406,12 @@ class DeterministicKoreanExtractor:
         if all_entities:
             from ontokit.filter import concept_gate as _cg
             if _cg.ENABLED:
-                _cg.apply(all_entities, self.nouns.kiwi)
+                _cgs = _cg.apply(all_entities, self.nouns.kiwi)
+                # 통계를 버리면 스냅샷 경로 누락(=조용한 무동작)이 드러나지 않는다 — 경고로 올린다
+                if _cgs.get("경고"):
+                    logger.warning("개념 게이트 on 이지만 무동작: %s", _cgs["경고"])
+                logger.info("개념 게이트: 검사 %d · 거부 %d · 판정불가 %d (스냅샷 %d)",
+                            _cgs["검사"], _cgs["거부"], _cgs["판정불가"], _cgs["스냅샷"])
 
         # ②" 정의문 인스턴스 타이핑 (ABox↔TBox 브리지) — 정의문 주어가 NER
         #   개체면 subClassOf 대신 rdf:type. 본질 진단(0714): 계층 클래스 13,441

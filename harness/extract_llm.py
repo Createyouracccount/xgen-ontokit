@@ -15,7 +15,6 @@ import urllib.request
 
 from harness.schema import RELATIONS
 
-OLLAMA = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 _CAT = "\n".join(f"- {k}: {v[0]} — {v[1]}" for k, v in RELATIONS.items())
 PROMPT = f"""아래 문서의 주제(첫 줄의 표제)에 대해, **본문에 적혀 있는 사실만** JSON 으로 뽑아라.
@@ -32,22 +31,20 @@ PROMPT = f"""아래 문서의 주제(첫 줄의 표제)에 대해, **본문에 �
 
 
 def ask(model, text, timeout=300):
-    body = {"model": model, "prompt": PROMPT + text[:2000], "stream": False, "think": False,
-            "format": "json", "options": {"temperature": 0, "seed": 0, "num_ctx": 4096, "num_predict": 1024}}
-    req = urllib.request.Request(f"{OLLAMA}/api/generate", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    return parse_salvage(json.load(urllib.request.urlopen(req, timeout=timeout))["response"])
+    from harness.llm import generate_json
+    return generate_json(PROMPT + text[:2000], model=model, num_ctx=4096, max_tokens=1024, timeout=timeout)
 
 
 def parse_salvage(txt):
     """JSON 파싱 — 출력 상한에 잘린 경우 마지막으로 완결된 항목까지 살린다(잘린 꼬리만 버림).
-    복구 불가면 예외(0건으로 조용히 넘기지 않는다)."""
+    객체 배열(관계)과 문자열 배열(답 목록) 둘 다 처리. 복구 불가면 예외(0건으로 조용히 넘기지 않는다).
+    L1 에서 문자열 배열이 잘린 137건을 '복구 불가'로 0점 처리한 결함(VLLM 팔에 편중)을 고친 것."""
     try:
         return json.loads(txt)
     except json.JSONDecodeError:
         pass
     for i in range(len(txt) - 1, 0, -1):
-        if txt[i] != "}":
+        if txt[i] not in '}"]':
             continue
         for tail in ("]}", "}", "]}}", ""):
             try:

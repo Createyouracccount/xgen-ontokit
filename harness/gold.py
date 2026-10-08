@@ -184,8 +184,6 @@ def build(f, seed=20261006):
             sub = sum(1 for v in m.values() if v == "sub")
             cls_rows.append((c, m, sub / len(m)))
     rng.shuffle(cls_rows)
-    is_occ = {t for s, ts in f.types.items() for t in ts
-              if t in {o for s2 in [s] for o in (f.objects.get(t) or {}).get("claims", {}).get("P31", [])}}
 
     def cls_phrase(c):
         return f"'{f.label(c)}'에 해당하는 인물·항목"

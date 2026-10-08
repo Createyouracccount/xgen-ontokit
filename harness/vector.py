@@ -11,6 +11,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 DOCS_API = os.getenv("DOCS_API", "http://localhost:8003")
@@ -74,7 +76,15 @@ def search(coll, query, k=40):
                                  data=json.dumps(body, ensure_ascii=False).encode(),
                                  headers={"Content-Type": "application/json", "X-User-ID": "1", "X-User-Name": "admin",
                                           "X-User-Superuser": "true"})
-    res = json.load(urllib.request.urlopen(req, timeout=120)).get("results", [])
+    for i, wait in enumerate((10, 30, 60, None)):   # 일시 타임아웃 재시도(L1 에서 10:59 1회 발생) — 끝내 실패하면 예외
+        try:
+            res = json.load(urllib.request.urlopen(req, timeout=120)).get("results", [])
+            break
+        except (TimeoutError, urllib.error.URLError):
+            if wait is None:
+                raise
+            print(f"[vector] 검색 타임아웃 재시도 {i + 1}/3 — {wait}s 대기", flush=True)
+            time.sleep(wait)
     if not res:
         raise RuntimeError(f"벡터 검색 0건: {coll} / {query[:40]}")
     return [{"doc_id": r["document_id"], "title": r.get("file_name"), "score": r["score"],

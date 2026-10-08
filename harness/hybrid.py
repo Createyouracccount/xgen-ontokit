@@ -5,7 +5,9 @@
 
 - VLLM: 상위 40청크(청크당 600자)만
 - HYB:<arm>: 같은 청크 + 그래프 질의 결과 블록(계획 실패·결과 0이면 블록 없음 = VLLM 과 같은 입력)
-- 판독기 qwen3:8b(temperature 0, seed 0). 계획은 문항당 1회 계산해 캐시(팔 사이 동일).
+- 판독기 Qwen3-8B(temperature 0, seed 0). 백엔드는 harness.llm(env) — 로컬 MLX·DGX vLLM 을 --shard 로 나눠 병렬.
+  환경마다 판독 결과가 다를 수 있으므로 out 에 환경을 기록하고, 겹침 표본으로 환경 차이를 따로 잰다.
+  계획은 문항당 1회 계산해 캐시(팔 사이 동일).
 - 이어하기: out 파일에 있는 (문항, 팔) 은 건너뛴다.
 """
 import argparse
@@ -19,8 +21,6 @@ import urllib.request
 from harness import vector
 from harness.run import score_nodes
 
-OLLAMA = os.getenv("OLLAMA_URL", "http://localhost:11434")
-READER = os.getenv("HARNESS_READER_MODEL", "qwen3:8b")
 K, CHARS, GRAPH_MAX = 40, 600, 150
 
 
@@ -36,13 +36,16 @@ def read(q, hits, graph_items):
     # 그래프 블록을 문서 뒤에 둔다 — 팔 사이 프롬프트 앞부분이 같아 판독기 KV 캐시를 재사용한다
     prompt = (f"아래 자료만 근거로 질문에 답하라. 자료에 없는 것은 쓰지 마라. JSON 하나만 출력: {want}\n\n"
               f"{ctx}\n\n{gblock}질문: {q['q']}")
-    body = {"model": READER, "prompt": prompt, "stream": False, "think": False, "format": "json",
-            "options": {"temperature": 0, "seed": 0, "num_ctx": 32768, "num_predict": 1024}}
-    req = urllib.request.Request(f"{OLLAMA}/api/generate", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    from harness.extract_llm import parse_salvage
-    return parse_salvage(json.load(urllib.request.urlopen(req, timeout=900))["response"])
-
+    from harness.llm import generate_json
+    raw = {}
+    try:
+        out = generate_json(prompt, model=os.getenv("HARNESS_READER_MODEL") or None, num_ctx=32768,
+                            max_tokens=1024, raw_out=raw)
+    except ValueError as e:      # 복구 불가 JSON 도 원문은 남긴다
+        e.raw = raw.get("text", "")
+        raise
+    out["_raw"] = raw.get("text", "")[:2000]   # 원문 보존 — 파서·채점 결함을 재판독 없이 재채점(L1 파서 사고 대응)
+    return out
 
 def score(q, a):
     names = [x for x in (a.get("answers") or []) if isinstance(x, str)]
@@ -51,6 +54,7 @@ def score(q, a):
         sc["count_pred"] = a.get("count")
         sc["score"] = 1.0 if a.get("count") == q["gold"]["count"] else 0.0
     sc["answers"] = names[:60]
+    sc["raw"] = a.get("_raw", "")
     return sc
 
 
@@ -61,11 +65,15 @@ async def main():
     ap.add_argument("vec")
     ap.add_argument("out")
     ap.add_argument("--arms", required=True)
+    ap.add_argument("--shard", default="0/1", help="i/n — 문항 번호 mod n == i 만(환경 간 병렬 분할)")
     a = ap.parse_args()
     arms = a.arms.split(",")
-    qs = json.load(open(a.bench))
+    si, sn = map(int, a.shard.split("/"))
+    qs = [q for k, q in enumerate(json.load(open(a.bench))) if k % sn == si]
     res = json.load(open(a.out)) if os.path.exists(a.out) else {"run": a.run, "arms": [], "rows": [], "plans": {}}
     res["arms"] = list(dict.fromkeys(res["arms"] + arms))
+    res["llm"] = {"backend": os.getenv("HARNESS_LLM", "ollama"), "url": os.getenv("HARNESS_LLM_URL", ""),
+                  "model": os.getenv("HARNESS_LLM_MODEL", "")}
     rows = {r["id"]: r for r in res["rows"]}
     from harness.graph import graph_name, store
     from harness.planner import plan as llm_plan
@@ -99,7 +107,7 @@ async def main():
             except (urllib.error.URLError, ConnectionError, TimeoutError):
                 raise
             except Exception as e:
-                sc = {"score": 0.0, "err": str(e)[:160]}
+                sc = {"score": 0.0, "err": str(e)[:160], "raw": getattr(e, "raw", "")[:2000]}
             sc["graph_items"] = len(items)
             row["arms"][arm] = sc
         res["rows"] = list(rows.values())

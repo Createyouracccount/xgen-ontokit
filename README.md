@@ -337,6 +337,8 @@ graphstore(백엔드 교체형 저장소) 위에서 같은 질의계획을 SPARQ
 
 차수별 사전 공시·결과·측정하지 않은 것: [`harness/docs/`](harness/docs/). 실행 의존: Fuseki·Qdrant·문서 서비스(벡터 기준선),
 ollama(`qwen3:8b`), graphstore 소스(`GRAPHSTORE_SRC`), Neo4j 5(동치 검증). 원자료(`harness/data/`)는 커밋하지 않는다.
+장시간 측정은 `python -m harness.supervise`(비정상 종료 시 이어하기 재시작)와 `python -m harness.guard`(메모리 가드)로 돌린다 —
+둘 다 OS 무관(Linux 는 컨테이너 cgroup 한도 기준, macOS 는 `memory_pressure`, Windows 는 `GlobalMemoryStatusEx`).
 
 ## 구조
 ```
