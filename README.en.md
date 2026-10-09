@@ -136,7 +136,7 @@ ontokit build docs.jsonl -o graph.ttl            # zero LLM calls, source docume
 ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","class":"가수"}]}'
 ```
 
-`ontokit.graph` (projection) · `ontokit.query` (plan → SPARQL; in-memory, Oxigraph, remote) · `ontokit.merge` (merge graph
+`ontokit.graph` (projection) · `ontokit.query` (plan → SPARQL; in-memory, Oxigraph, remote) · `ontokit.backends.cypher` (same plan → Neo4j) · `ontokit.merge` (merge graph
 results into the reader's answer). The measurement harness ([`harness/`](harness/), outside the package) uses these modules
 as-is, and reproduces the L02 numbers question by question after the move ([S01](harness/docs/S01_라이브러리승격_동등성.md)).
 Long runs use `harness.supervise` (resume-on-crash) and `harness.guard` (OS-agnostic memory guard).
@@ -150,7 +150,7 @@ Long runs use `harness.supervise` (resume-on-crash) and `harness.guard` (OS-agno
 | Morphology · classes · hierarchy | Kiwi + rules (suffix sharing · definitions · occupation lexicon) | no model |
 | Entity recognition | KoELECTRA-small (local) | coarse types (person · org · location…) |
 | Relation extraction | KLUE-RE roberta-small v13c (local, opt-in) | external-gold F1 0.6169; large 0.6726 is 2.2× slower, optional |
-| Graph store | in-memory (rdflib) · embedded Oxigraph — no server. At measurement time: Fuseki · Neo4j (LPG, via graphstore) | same query, same answers (per question — [S01](harness/docs/S01_라이브러리승격_동등성.md)) |
+| Graph store | in-memory (rdflib) · embedded Oxigraph — no server · optional: Neo4j (Cypher, driver only). At measurement time: Fuseki | same query, same answers (per question — [S01](harness/docs/S01_라이브러리승격_동등성.md)) |
 | Planner · reader (measurement) | Qwen3-8B 4-bit, local (MLX) | nothing leaves the machine; weaker than the product's large LLM |
 | Vector search (measurement baseline) | XGEN product search API · text-embedding-3-small | product settings as-is |
 

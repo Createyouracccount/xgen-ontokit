@@ -129,7 +129,7 @@ ontokit build docs.jsonl -o graph.ttl            # LLM 0회. 출처 문서 포�
 ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","class":"가수"}]}'
 ```
 
-`ontokit.graph`(투영) · `ontokit.query`(계획 → SPARQL, 인메모리·Oxigraph·원격) · `ontokit.merge`(판독 답에 그래프 결과 병합).
+`ontokit.graph`(투영) · `ontokit.query`(계획 → SPARQL, 인메모리·Oxigraph·원격) · `ontokit.backends.cypher`(같은 계획 → Neo4j) · `ontokit.merge`(판독 답에 그래프 결과 병합).
 측정 하네스([`harness/`](harness/), 패키지 밖)는 이 모듈을 그대로 쓰며, 옮긴 뒤에도 L02 수치가 문항 단위로 같다
 ([S01](harness/docs/S01_라이브러리승격_동등성.md)). 장시간 측정은 `harness.supervise`·`harness.guard` 로 돌린다.
 
@@ -142,7 +142,7 @@ ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","
 | 형태소·클래스·계층 | Kiwi + 규칙(접미 공유·정의문·직업 어휘집) | 모델 없음 |
 | 개체 인식 | KoELECTRA-small (로컬) | 타입이 거칠다(인물·기관·지역…) |
 | 관계 추출 | KLUE-RE roberta-small v13c (로컬, opt-in) | 외부 정답 F1 0.6169. large 0.6726 은 2.2배 느려 선택형 |
-| 그래프 저장소 | 인메모리(rdflib) · 내장 Oxigraph — 서버 없음. 측정 당시 Fuseki · Neo4j(LPG, graphstore 경유) | 같은 질의 같은 답(문항 단위 — [S01](harness/docs/S01_라이브러리승격_동등성.md)) |
+| 그래프 저장소 | 인메모리(rdflib) · 내장 Oxigraph — 서버 없음 · 선택: Neo4j(Cypher, 드라이버 직접). 측정 당시 Fuseki | 같은 질의 같은 답(문항 단위 — [S01](harness/docs/S01_라이브러리승격_동등성.md)) |
 | 계획기·판독기 (측정) | Qwen3-8B 4비트, 로컬(MLX) | 외부 전송 0. 제품의 대형 LLM 보다 약하다 |
 | 벡터 검색 (측정 기준선) | XGEN 제품 검색 API · text-embedding-3-small | 제품 설정 그대로 |
 

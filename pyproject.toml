@@ -18,6 +18,7 @@ synonym-embed = ["sentence-transformers>=3.0"]  # ER 의미변이 임베딩 보�
 discover = ["soynlp>=0.0.5"]            # 도메인 신조어 자동 발굴
 owl = ["rdflib>=6.0"]                   # 결정적 OWL/TTL 생성 · 그래프 투영·인메모리 질의(ontokit.graph/query)
 oxigraph = ["rdflib>=6.0", "pyoxigraph>=0.5"]   # 내장 SPARQL 저장소(서버·JVM 없음, 디렉터리 저장) — Fuseki 대체
+neo4j = ["rdflib>=6.0", "neo4j>=5.0"]   # Cypher(LPG) 백엔드 — Neo4j 5 (ontokit.backends.cypher)
 fuseki = ["httpx>=0.27"]               # GraphStore 백엔드
 qdrant = ["qdrant-client>=1.12"]       # VectorStore 백엔드
 dev = ["pytest>=8", "ruff>=0.5"]

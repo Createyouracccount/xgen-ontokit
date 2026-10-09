@@ -3,11 +3,15 @@
 
   python -m harness.parity_mem <run> <arm> <ontokit_raw.json|facts.json> <docs.jsonl> <bench.json> [결과.json(plans)]
 
+  env HARNESS_PARITY_BACKEND=neo4j → 하네스 저장소 대신 Neo4j(ontokit.backends.cypher, bolt://localhost:7687,
+  비밀번호 env NEO4J_PASSWORD 또는 harness/data/.neo4j_pass)에 그래프를 싣고 Cypher 로 비교한다(S01 §8).
+
 계획 출처: 벤치 정답 계획(q["plan"]) + 결과 파일의 LLM 저장 계획(있으면). 실패(예외)·빈 결과·동일을 따로 센다 —
 양쪽이 똑같이 실패하거나 똑같이 비어도 "동일"로 보이므로.
 """
 import asyncio
 import json
+import os
 import sys
 import time
 
@@ -20,9 +24,9 @@ def _answer(out):
     return {n["uri"]: sorted(n["names"]) for n in out["nodes"]}
 
 
-async def _fuseki(st, p, gn):
+async def _stored(st, p, gn, runner):
     try:
-        return _answer(await run_plan(st, p, gn))
+        return _answer(await runner(st, p, gn))
     except ValueError as e:
         return ("ValueError", str(e))
 
@@ -46,9 +50,15 @@ async def main():
     sources = {"bench_plan": {q["id"]: q.get("plan") for q in qs}}
     if len(sys.argv) > 6:
         sources["saved_plan"] = json.load(open(sys.argv[6]))["plans"]
-    st = store()
     gn = graph_name(run_, arm)
-    report = {"arm": arm, "triples": len(g)}
+    if os.getenv("HARNESS_PARITY_BACKEND") == "neo4j":
+        from ontokit.backends.cypher import Neo4jStore, run_plan as runner
+        pw = os.getenv("NEO4J_PASSWORD") or open(os.path.join(os.path.dirname(__file__), "data", ".neo4j_pass")).read().strip()
+        st = Neo4jStore("bolt://localhost:7687", "neo4j", pw)
+        loaded = await st.load(g, gn)
+    else:
+        st, runner, loaded = store(), run_plan, None
+    report = {"arm": arm, "triples": len(g), "backend": os.getenv("HARNESS_PARITY_BACKEND", "store"), "loaded": loaded}
     for name, plans in sources.items():
         c = {"plans": 0, "identical": 0, "differ": 0, "both_error": 0, "nonempty": 0, "diff_ids": []}
         t_mem = t_max = 0.0
@@ -56,7 +66,7 @@ async def main():
             if not p:
                 continue
             c["plans"] += 1
-            a = await _fuseki(st, p, gn)
+            a = await _stored(st, p, gn, runner)
             t0 = time.time()
             b = _mem(g, p)
             dt = time.time() - t0

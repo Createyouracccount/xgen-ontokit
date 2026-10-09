@@ -159,3 +159,19 @@ def test_oxigraph_store_matches_memory():
                "where": [{"t": "rel", "s": {"const": "김가수"}, "p": "per:employee_of", "o": {"var": "y"}}]}):
         assert asyncio.run(run_plan(st, p, "urn:t"))["nodes"] == run(g, p)["nodes"]
     assert st.load(g, "urn:t") == len(g)   # 같은 이름으로 다시 실으면 교체(누적 아님)
+
+
+def test_cypher_compile_and_projection_without_server():
+    """Cypher 백엔드 — 서버 없이 투영·컴파일만. 실제 Neo4j 동치는 harness/docs/S01 §8."""
+    from ontokit.backends.cypher import CypherCompiler, project as lpg
+    g, _ = project(RAW, DOCS)
+    nodes, edges = lpg(g, "t")
+    assert {k for _, k, _, _ in edges} == {"TYPE", "SUBCLASS_OF", "DESCRIBES", "REL"}
+    assert sorted(k for _, t, _, k in edges if t == "REL") == ["per:employee_of", "per:place_of_birth"]
+    q, params = CypherCompiler("t").compile(
+        {"op": "list", "return": "y", "where": [{"t": "rel", "s": {"const": "김가수"}, "p": "per:parents", "o": {"var": "y"}}]})
+    assert params == {"g": "t", "k1": "김가수", "k2": "per:parents", "k3": "per:children"}
+    assert "EXISTS { (k1)-[e:REL]->(y) WHERE e.key = $k2 } OR EXISTS { (y)-[e:REL]->(k1) WHERE e.key = $k3 }" in q
+    assert "DESCRIBES" not in q   # x 를 안 쓰면 표제 개체 제한도 없다
+    with pytest.raises(ValueError):
+        CypherCompiler("t").compile({"op": "list", "return": "x", "where": [{"t": "rel", "s": "x", "p": "per:siblings", "o": "y"}]})

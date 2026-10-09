@@ -17,6 +17,7 @@ pip install "xgen-ontokit[korean,ner,owl] @ git+https://github.com/Createyouracc
 | `owl` (rdflib) | 그래프 투영(`ontokit.graph`)·인메모리 질의(`ontokit.query.run`)·`ontokit query` |
 | `korean`, `ner` (Kiwi, transformers·torch) | `ontokit build`(추출). KoELECTRA NER 가중치는 첫 실행에 Hugging Face 에서 받는다 |
 | `oxigraph` (pyoxigraph) | 디스크에 남는 내장 SPARQL 저장소(서버·JVM 없음) — 선택 |
+| `neo4j` (neo4j 드라이버) | Neo4j 5 에 싣고 Cypher 로 질의 — 선택 |
 
 ⚠️ **추출 결과는 kiwipiepy 버전에 따라 달라진다.** L02 측정 그래프는 kiwipiepy 0.23.2 로 만들었다. 0.24.0 에서는 같은 60문서에서
 개체 902→905, 하위 클래스 32→26 이 됐다(어느 쪽이 나은지는 측정하지 않았다). 측정 그래프를 재현하려면
@@ -65,6 +66,7 @@ answer = merge.merge(reader["answers"], nodes, op=plan["op"], reader_count=reade
 | 인메모리 `query.run(g, plan)` | rdflib, 프로세스 안 | Fuseki 와 EVAL 4개 그래프 × 계획 2종 문항별 전부 동일(S01 §5) |
 | `ontokit.backends.oxigraph.OxigraphStore(path)` | 내장 SPARQL, 디렉터리 저장 | 인메모리와 문항별 동일(S01 §6) |
 | 원격 SPARQL 저장소 `await query.run_plan(store, plan, graph)` | `async sparql_query(q)` 를 가진 아무 객체 | L02 측정(Fuseki) 그대로 |
+| `ontokit.backends.cypher.Neo4jStore` + `cypher.run_plan` | Neo4j 5(LPG, Cypher), 드라이버 직접 — extra `neo4j` | 인메모리와 문항별 동일(S01 §8) |
 
 ```python
 from ontokit.backends.oxigraph import OxigraphStore
@@ -75,7 +77,7 @@ nodes = (await query.run_plan(st, plan, "urn:my-graph"))["nodes"]
 
 ontokit 은 Fuseki·graphstore 에 의존하지 않는다. 측정 하네스도 Oxigraph 로 옮겼다 — 같은 측정 그래프 13개(141만 트리플)가
 Fuseki 에서 3.0GB, Oxigraph 에서 약 0.4GB 였고, 지우고 다시 싣기를 반복해도 쌓이지 않았다(S01 §6).
-Cypher(Neo4j 등 LPG)로 같은 계획을 실행하는 경로는 아직 하네스(`harness/lpg.py`, graphstore 경유)에만 있다.
+같은 계획을 Cypher 로 컴파일해 Neo4j 5 에서도 실행한다(graphstore 불필요). Memgraph 등 다른 Cypher 엔진은 확인하지 않았다.
 
 ## 5. 관계 채널 — 가중치가 있어야 켜진다
 
