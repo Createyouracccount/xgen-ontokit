@@ -93,3 +93,12 @@ def test_placebo_changes_every_fact():
     orig = {(r["s"], r["p"], r["o"]) for r in rels}
     assert len(nr) == len(rels) and not ({(r["s"], r["p"], r["o"]) for r in nr} & orig)
     assert all(not (set(t) & set(dict(types)[s])) for s, t in nt)
+
+
+def test_committed_results_have_no_local_paths():
+    # 공개 레포 — 측정 로그의 오류 추적에 로컬 절대경로가 섞여 들어간 적이 있다(L1·H1 로그)
+    import pathlib, re
+    pat = re.compile(r"/Users/|/home/[a-z]|/private/tmp/|[A-Z]:\\\\Users\\\\")
+    bad = [str(p) for d in ("harness/results", "harness/results_sealed", "harness/docs")
+           for p in pathlib.Path(d).rglob("*") if p.is_file() and pat.search(p.read_text(errors="ignore"))]
+    assert bad == [], bad

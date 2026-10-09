@@ -2,34 +2,34 @@
 [vector] 검색 타임아웃 재시도 2/3 — 30s 대기
 [vector] 검색 타임아웃 재시도 3/3 — 60s 대기
 Traceback (most recent call last):
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 1319, in do_open
+  File "<python>/urllib/request.py", line 1319, in do_open
     h.request(req.get_method(), req.selector, req.data, headers,
     ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
               encode_chunked=req.has_header('Transfer-encoding'))
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1338, in request
+  File "<python>/http/client.py", line 1338, in request
     self._send_request(method, url, body, headers, encode_chunked)
     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1384, in _send_request
+  File "<python>/http/client.py", line 1384, in _send_request
     self.endheaders(body, encode_chunked=encode_chunked)
     ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1333, in endheaders
+  File "<python>/http/client.py", line 1333, in endheaders
     self._send_output(message_body, encode_chunked=encode_chunked)
     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1093, in _send_output
+  File "<python>/http/client.py", line 1093, in _send_output
     self.send(msg)
     ~~~~~~~~~^^^^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1037, in send
+  File "<python>/http/client.py", line 1037, in send
     self.connect()
     ~~~~~~~~~~~~^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1003, in connect
+  File "<python>/http/client.py", line 1003, in connect
     self.sock = self._create_connection(
                 ~~~~~~~~~~~~~~~~~~~~~~~^
         (self.host,self.port), self.timeout, self.source_address)
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/socket.py", line 864, in create_connection
+  File "<python>/socket.py", line 864, in create_connection
     raise exceptions[0]
-  File "/opt/miniconda3/lib/python3.13/socket.py", line 849, in create_connection
+  File "<python>/socket.py", line 849, in create_connection
     sock.connect(sa)
     ~~~~~~~~~~~~^^^^
 ConnectionRefusedError: [Errno 61] Connection refused
@@ -39,37 +39,37 @@ During handling of the above exception, another exception occurred:
 Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
   File "<frozen runpy>", line 88, in _run_code
-  File "/Users/kimdu/company/xgen-levelup/xgen-ontokit/harness/hybrid.py", line 113, in <module>
+  File "harness/hybrid.py", line 113, in <module>
     asyncio.run(main())
     ~~~~~~~~~~~^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/asyncio/runners.py", line 195, in run
+  File "<python>/asyncio/runners.py", line 195, in run
     return runner.run(main)
            ~~~~~~~~~~^^^^^^
-  File "/opt/miniconda3/lib/python3.13/asyncio/runners.py", line 118, in run
+  File "<python>/asyncio/runners.py", line 118, in run
     return self._loop.run_until_complete(task)
            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "/opt/miniconda3/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+  File "<python>/asyncio/base_events.py", line 725, in run_until_complete
     return future.result()
            ~~~~~~~~~~~~~^^
-  File "/Users/kimdu/company/xgen-levelup/xgen-ontokit/harness/hybrid.py", line 79, in main
+  File "harness/hybrid.py", line 79, in main
     hits = vector.search(a.vec, q["q"], K)
-  File "/Users/kimdu/company/xgen-levelup/xgen-ontokit/harness/vector.py", line 81, in search
+  File "harness/vector.py", line 81, in search
     res = json.load(urllib.request.urlopen(req, timeout=120)).get("results", [])
                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 189, in urlopen
+  File "<python>/urllib/request.py", line 189, in urlopen
     return opener.open(url, data, timeout)
            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 489, in open
+  File "<python>/urllib/request.py", line 489, in open
     response = self._open(req, data)
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 506, in _open
+  File "<python>/urllib/request.py", line 506, in _open
     result = self._call_chain(self.handle_open, protocol, protocol +
                               '_open', req)
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 466, in _call_chain
+  File "<python>/urllib/request.py", line 466, in _call_chain
     result = func(*args)
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 1348, in http_open
+  File "<python>/urllib/request.py", line 1348, in http_open
     return self.do_open(http.client.HTTPConnection, req)
            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 1322, in do_open
+  File "<python>/urllib/request.py", line 1322, in do_open
     raise URLError(err)
 urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
 [supervise] 2026-10-08 09:52:18 비정상 종료 — 재시작 1/10

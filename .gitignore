@@ -31,3 +31,7 @@ eval/relation/*.tar.gz
 eval/relation/model_re_scale_large_onnx*/
 eval/relation/v1[45]_*.log
 harness/data/
+# 측정 중 폐기·운영 로그(커밋 안 함): DGX 부분 실행(L00 §10), 가드 로그
+harness/results_sealed/H1_s*
+harness/results/envoverlap_dgx*
+harness/results/guard.log
