@@ -2,323 +2,202 @@
 
 [한국어](README.md) · **ENGLISH**
 
-A library that extracts an ontology (classes, hierarchy, entities, relations) from Korean
-documents **without an LLM**.
+**Build an ontology graph (entities · types · relations · hierarchy) from Korean documents without an LLM, and use it to add
+answers to the questions vector search cannot handle — "list them all · how many · who relates to whom".**
 
-**What it does** — feed it document chunks and it emits concepts (classes), a `subClassOf`
-hierarchy, entities, and relation triples. Extraction runs on morphological analysis (Kiwi),
-rules, statistics, and local encoders only — it **makes no LLM API calls on the default path**.
-(There is one LLM top-up channel, but it only activates if you inject it explicitly, and with
-a zero budget it behaves identically to pure rules.)
+- **Build** — document chunks → entities, types, relations, `subClassOf` hierarchy. Morphology, rules and small local models only
+  (0 LLM calls, nothing leaves the machine, same input → same graph).
+- **Store** — graph-DB agnostic. The same query returns the same answers on Fuseki (RDF/SPARQL) and Neo4j (LPG/Cypher)
+  (via [graphstore](https://github.com/Createyouracccount/xgen-graphstore)).
+- **Use** — turn a question into a graph query and **merge the results into the vector-search answer**. This is the only way
+  of using the graph that has been shown to improve real answers.
 
-**Why LLM-free** — for cases that need these three things:
-- **Cost**: ~$0 per document. (For reference, LLM extraction pipelines run in the tens of
-  dollars per 1M tokens.)
-- **Determinism·reproducibility**: same input → same output. Auditable, roll-back-able, A/B-able.
-- **Data control**: all inference is local. Documents never leave for an external API.
+---
 
-**The limits are real too** — open-domain relation recall and implicit/heterogeneous hypernym
-inference are better served by LLM extraction. This library trades that gap for the three
-properties above. See [Quality evidence](#quality-evidence--only-what-you-can-reproduce)
-for details and for what falls short.
+## At a glance — how it is used
 
-```python
-from ontokit import DeterministicKoreanExtractor
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/pipeline-dark.svg">
+  <img alt="Build: documents → ontokit → graph store. Query: question → planner/compiler → graph results → answer merge, joined by vector search + reader answer (labels in Korean)" src="docs/img/pipeline-light.svg" width="900">
+</picture>
 
-documents = {"file.pdf": [{"chunk_id": "c1", "chunk_text": "…", "chunk_index": 0}]}
+1. **Build** (when documents arrive): ontokit extracts entities, types, relations and hierarchy into the graph store.
+2. **Query** (when a question arrives): a planner turns the question into a query plan; a compiler runs it as SPARQL/Cypher,
+   using ontology semantics at query time — subclass closure ("musician" → singers, composers), inverse relations, aliases.
+3. **Merge**: the graph results are merged into the answer of a reader LLM that read the top-40 vector-search chunks;
+   count questions use the graph count.
 
-ext = DeterministicKoreanExtractor()          # no args = 0 LLM calls, 0 model loads
-concepts, entities, relations, data = await ext.extract(documents)
-```
-(Entity extraction requires injecting a NER — see [Install](#install) and the
-[defaults table](#defaults--env-switches-at-a-glance).)
+> ⚠️ The XGEN product does not use ontokit today, and uses its graph only to fetch extra chunks (measured: no effect).
+> The merge path above is **validated inside the measurement harness and not yet in the product**.
 
-## Language support matrix (v0.16.0, stated honestly)
+---
 
-| Axis | Korean | English | Mixed chunks |
+## Where it stands — an honest scorecard
+
+Answers from **vector search + LLM** alone vs. the same answers **merged with ontokit graph results**, scored against gold.
+3,000 documents used during development (EVAL) and 3,000 **never-seen** documents (HOLDOUT), 210 questions each.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/effect-dark.svg">
+  <img alt="Change in real-answer score vs. vector+LLM: graph-result merge EVAL +0.081, HOLDOUT +0.057 / gold graph +0.699, +0.630 / fake graph +0.023, +0.009 (labels in Korean)" src="docs/img/effect-light.svg" width="900">
+</picture>
+
+| Condition (score change vs. vector+LLM, 95% CI) | EVAL | HOLDOUT (never-seen docs) |
+|---|---|---|
+| **Merge ontokit graph results** (built without an LLM) | **+0.081** [+0.049, +0.115] | **+0.057** [+0.030, +0.086] |
+| Gold graph — if extraction were perfect (ceiling) | +0.699 [+0.599, +0.792] | +0.630 [+0.521, +0.736] |
+| Fake graph — every fact swapped (negative control) | +0.023 [−0.024, +0.083] | +0.009 [−0.021, +0.048] |
+
+**How to read it** — merging improves answers even on never-seen documents (CI above 0). The fake graph does nothing, so the
+gain comes from the graph's **content**. But the gain is small — about 1/10 of the room the gold graph shows (+0.63).
+
+### Where it helps, and where it does not
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/forms-dark.svg">
+  <img alt="Real-answer score by question form on never-seen documents: up for type enumeration, inverse relation, multi-hop; no gain for counting and intersection; lookup unchanged (labels in Korean)" src="docs/img/forms-light.svg" width="900">
+</picture>
+
+| Question form (HOLDOUT) | vector + LLM | + ontokit merge | |
 |---|---|---|---|
-| Class (compound nouns) | ✅ Kiwi | ✅ nltk POS (extras[english], **auto-wire**) | ✅ dual extraction (minority-language terms preserved) |
-| Hierarchy (subClassOf) | ✅ character suffix-share + definitional (Hearst, **off by default** v0.14~) | ✅ word suffix-share (case-insensitive) | ✅ |
-| Entity (NER) | ✅ KoELECTRA (injected) | ✅ dslim BERT MIT (injected or `ONTOKIT_NER_EN=auto`) | ⚠️ dominant language only (cost) |
-| **Relation** | ✅ particle SVO (rules) + KLUE-RE encoder (opt-in) | ✅ **spaCy dependency SVO (opt-in, v0.13)** | Korean only |
-| Instance typing | ✅ definitional (opt-in) + **occupation P106 lexicon (on by default)** | ❌ unsupported | Korean only |
-| OWL labels | `@ko` | `@en` (auto-detected) | mixed output |
+| E1 type enumeration — "all items that are X" | 0.048 | **0.173** | 3.6× |
+| E2 superclass enumeration — "including subtypes" | 0.000 | **0.063** | |
+| R inverse relation — "everyone born in Seoul" | 0.084 | **0.204** | 2.4× |
+| M multi-hop — "the schools those people attended" | 0.051 | **0.088** | |
+| A counting — "how many" | 0.067 | 0.033 | ❌ no gain |
+| C intersection — "nationality X and occupation Y" | 0.039 | 0.037 | ❌ no gain |
+| L lookup — "where was X born" | 0.656 | 0.648 | no regression (vector's home turf) |
 
-⚠️ Quality-verification scope: Korean = measured on finreg 489, English = structural
-tests only (corpus measurement incomplete).
-Relation extraction: the rule-based particle SVO channel is now **availability-fallback only**
-(ensemble permanently rejected, B3) + **KLUE-RE encoder channel (opt-in, holdout micro-F1
-0.6169 — current v13c, external gold KLUE-RE)**. The encoder is enabled via env; when unset it falls back
-to rules — see [Relation encoder](#relation-encoder-v013--klue-re--sredfm-ko-augmented-holdout-06169-v13c) below.
-⚠️ Behavior change vs v0.5: `auto_english=True` is the default, so **English classes are
-newly added to Korean corpora containing Latin acronyms** (pure-Hangul corpora produce
-identical output — measured on finreg 489). Set `auto_english=False` to keep prior behavior.
-⚠️ Behavior change in v0.14: `enable_hearst` is now **off by default** — on a real news-corpus
-graph, 88.5% of the semantic `subClassOf` edges this channel produced were false (structural
-misfires on non-definitional predicate sentences). Encyclopedic/dictionary-style corpora should
-opt in with `enable_hearst=True` (external-gold 89/100 record on that register). v0.12–v0.13
-had it on by default. `enable_occupation=True` (occupation typing) stays on by default.
-⚠️ v0.15 behavior change: `enable_qdt_gate` **on by default** — blocks instance promotion
-of quantity/date/time (QT/DT/TI) entities that participate in **no relation**. Basis:
-entity-precision pilot (n=60, seed 20260810) — 17 of 38 graph defects were QT/DT/TI
-ghosts ("Q3", "year 2023"-style value entities with no document anchor); blocking kills
-zero legitimate entities. Entities serving as relation objects (founding dates etc.) are
-preserved. Restore old behavior: `enable_qdt_gate=False` or `ONTOKIT_QDT_GATE=off`.
-⚠️ v0.16 behavior change: **none**. Four new relation-encoder channels (table below) were added,
-all env opt-in, so default-path output equals v0.15 (existing 245 tests pass).
+### Why the scores are low
 
-### Defaults / env switches at a glance
+| Cause | Evidence |
+|---|---|
+| The test is hard by design | Every matching item across 3,000 docs must be named **exactly**; counts must be exact. Even a perfect reader caps vector search at ~0.25 on type enumeration |
+| **Graph quality sets the ceiling** | ontokit fact recall — relations 16.7% · types 11.5% (gold graph 100%) |
+| **Class names don't match the questions** | Question class names present in ontokit's type vocabulary — type enumeration 22/30, **superclass 9/30** |
+| The reader is small | A local 8B model: wrong names, repetition, and it drops correct graph answers (which is why merging helps) |
 
-What a no-arg `DeterministicKoreanExtractor()` turns on, vs what only env enables:
+Full process, failures and corrections: [`harness/docs/`](harness/docs/) (Korean) — verdict summary in
+[`L02_루프탈출_판정.md`](harness/docs/L02_루프탈출_판정.md).
 
-| Channel | Default | Switch | Loads a model? |
+---
+
+## What was done — graph-quality rounds
+
+Score when answering from the graph **alone**. Each round fixed the single biggest loss and re-measured (all pre-registered).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/rounds-dark.svg">
+  <img alt="Graph-only score: round 1 0.018, 2 0.048, 3 0.096, 4 0.113, 5 0.128, 6 (local-LLM extraction) 0.302; vector-search ceiling 0.162 (labels in Korean)" src="docs/img/rounds-light.svg" width="900">
+</picture>
+
+| Round | Treatment | Score | Result |
 |---|---|---|---|
-| Korean classes·suffix-share hierarchy | **on** | — | no (Kiwi) |
-| English classes | **on** (if nltk installed) | `auto_english=False` | no (nltk POS) |
-| Definitional hierarchy·typing (Hearst) | **off** (v0.14~) | `enable_hearst=True` | no (rules) |
-| Occupation typing (P106) | **on** | `enable_occupation=False` / `ONTOKIT_OCCUPATION_TYPING=off` | no (bundled lexicon) |
-| QDT ghost gate | **on** (v0.15~) | `enable_qdt_gate=False` / `ONTOKIT_QDT_GATE=off` | no (rules) |
-| Korean relations (particle SVO) | **on** | `enable_relations=False` | no (Kiwi) |
-| Relation encoder (KLUE-RE) | off | `ONTOKIT_RELATION_ENCODER_MODEL` | transformers (local) |
-| ↳ zero-subject restoration (v0.16) | off | `ONTOKIT_RE_TOPIC_SUBJECT=1` — the first sentence's leading PER/ORG becomes the subject of subject-dropped sentences | (needs encoder) |
-| ↳ per-sentence pair cap (v0.16) | off (60 per chunk) | `ONTOKIT_RE_MAX_PAIRS_PER_SENT=N` | (needs encoder) |
-| ↳ location-statement relations (v0.16) | off | `ONTOKIT_LOC_REL=1` — "Y의 …"·"Y에 있는"·"Y 북부" → `loc:located_in`·`loc:country` (`per:origin` for persons) | (needs encoder) |
-| ↳ institution-suffix candidates (v0.16) | off | `ONTOKIT_RE_SUFFIX_ORG=1` — NER-missed `…대학교`·`…회사` spans added as ORG candidates | (needs encoder) |
-| English NER | off | `ONTOKIT_NER_EN=auto` | transformers (local) |
-| English relations (spaCy) | off | `ONTOKIT_RELATION_EN=auto` | spaCy |
-| Auxiliary NER union | off | `ONTOKIT_NER_AUX_MODEL` | transformers (local) |
-| Dictionary synonym merge | off | `ONTOKIT_SYNONYM_DICT` | no (TSV) |
+| 1 | Baseline | 0.018 | relation recall 1.6% diagnosed |
+| 2 | Restore dropped subjects · per-sentence pair cap | 0.048 | ✅ significant |
+| 3 | Definitional channel (encyclopedic only) | 0.096 | ✅ significant |
+| 4 | Location-statement relations | 0.113 | ✅ significant |
+| 5 | Add NER-missed institution names | 0.128 | ✅ significant — still below the vector ceiling (0.162) → **"graph alone beats vector without an LLM" failed** |
+| 6 | + local LLM (Qwen3-8B) extraction | 0.302 | beats the ceiling, but 12 h for 3,000 docs and Wikipedia-contamination risk |
 
-**Invariant**: the default path makes **0 LLM calls and 0 transformers loads**. Every
-model-backed channel is env opt-in, and the one new on-by-default channel (occupation typing)
-only reads a lexicon bundled in the package (zero network). The sole LLM path is
-`relation_hybrid.HybridRelationExtractor`, reachable only by **explicitly injecting**
-`relation_extractor=`, and with a zero budget it is equivalent to pure rules.
+→ Since the graph alone could not beat vector search, the approach changed to **merging graph results into the vector answer** —
+and that is what was validated (scorecard above).
 
-#### Experimental switches (off by default — rejected or not yet validated)
+---
 
-⚠️ These are read at **module import time** — changing them inside a running process has no
-effect (run A/B arms in separate processes). Read the rejection notes in the source first.
+## Quick start
 
-| env | default | status · basis (source) |
-|---|---|---|
-| `ONTOKIT_NER_AGGREGATION` | `simple` | `first` cuts truncation 4.8× but over-includes particles — **only paired with `ONTOKIT_WORD_BOUNDARY`**. `average`/`max` rejected (raises) (`ner/koelectra.py`) |
-| `ONTOKIT_WORD_BOUNDARY` | off | particle trim at word boundary; not yet judged (`ner/word_boundary.py`) |
-| `ONTOKIT_NER_OFFSET_SLICE` | off | take entity strings from source slices (fixes `140 %`-style rejoin spaces, 3.49%) (`ner/koelectra.py`) |
-| `ONTOKIT_SUFFIX_FRAGMENT` | off | suffix-fragment removal; rejected because the measurement was invalid (`ner/suffix_fragment.py`) |
-| `ONTOKIT_KO_SPAN_REPAIR` | off | Korean span repair; **rolled back** (kill rate 4.35% > pre-declared 3%) (`ner/span_align.py`) |
-| `ONTOKIT_KO_LEFT_COMPLETE` | off | left compound completion; 3/3 judges REJECT (`ner/span_align.py`) |
-| `ONTOKIT_CONCEPT_GATE` (+`_CLASSES`, `ONTOKIT_P279_SNAPSHOT`) | off | P279 concept gate; parked (R14 −1.05pp). ⚠️ silently no-op without a snapshot path (`filter/concept_gate.py`) |
-| `ONTOKIT_OCCUPATION_EVIDENCE` | `adj` | occupation-typing evidence gate mode (news false positives 63.6%→0%) |
-
-## Philosophy
-- **Zero core dependencies** — backends·models (kiwipiepy/transformers/httpx) are all extras.
-- **Protocol injection** — XGEN injects only protocol implementations, no infra coupling.
-  `Extractor`/`GraphStore`/`VectorStore`/`LLM`.
-- **Single source** — improvements are managed in one library, not hardcoded inline in XGEN
-  code. A/B via config switch.
-
-## Install
 ```bash
-pip install xgen-ontokit                 # core (zero dependencies)
-pip install "xgen-ontokit[korean]"       # + Kiwi morphology
-pip install "xgen-ontokit[ner]"          # + KoELECTRA NER
-pip install "xgen-ontokit[relation-encoder]"  # + KLUE-RE relation encoder (opt-in)
-pip install "xgen-ontokit[english-relations]" # + spaCy English dependency SVO (opt-in)
-pip install "xgen-ontokit[all]"          # everything
-# ⚠️ english-relations needs the spaCy model fetched separately (not a PyPI package):
-#   python -m spacy download en_core_web_sm
-# Direct from GitHub:
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
+pip install "xgen-ontokit[korean,ner]"                 # Kiwi morphology + KoELECTRA NER
+pip install "xgen-ontokit[relation-encoder]"           # + local relation encoder (optional)
 ```
 
-## Build — LLM-free Korean·English extraction
 ```python
+import asyncio
 from ontokit import DeterministicKoreanExtractor
+from ontokit.ner.koelectra import KoElectraNER
 
-ext = DeterministicKoreanExtractor(domain_words=["여신전문금융업", "보험업"])
-concepts, entities, relations, data = await ext.extract(documents)
-# documents = {"filename": [{"chunk_id","chunk_text","chunk_index"}, ...]}
-# concepts.class_hierarchy holds the subClassOf hierarchy (suffix-share), with source_chunks tagging
+documents = {"doc.txt": [{"chunk_id": "c1", "chunk_text": "김가수는 서울에서 태어난 가수이다.", "chunk_index": 0}]}
+ext = DeterministicKoreanExtractor(ner=KoElectraNER())          # 0 LLM calls
+concepts, entities, relations, _ = asyncio.run(ext.extract(documents))
+# entities → {'doc.txt': [{'entity': '김가수', 'class': '인물', 'source_chunks': ['c1'], ...},
+#                         {'entity': '서울', 'class': '지역', ...}, ...]}
+# concepts → classes · class_hierarchy (subClassOf) / relations → [(subject, relation, object), ...]
+# relations need the local relation encoder: export ONTOKIT_RELATION_ENCODER_MODEL=<model path>
+# every output carries source_chunks (which chunk it came from)
 ```
-finreg 489 measured: **4.5s / $0** (vs gpt-4o 23min/$2), classes 3156·subClassOf 1710.
-Search A/B: identical Recall@10 (0.947) to a gpt-4o build. ⚠️ But this metric is **carried
-by the vector leg (embedding + FTS)**, so it *cannot measure the difference between build
-methods* (LLM vs LLM-free indistinguishable). Hierarchy·relation quality must be measured
-separately by hierarchy counts / full enumeration / relation GT (see roadmap).
 
-## Citation ontology (v0.8) — doc-level `:cites`
-```python
-from ontokit.citations import CitationCollector, citations_insert_update, doc_uri
+Loading, querying and merging live in the measurement harness ([`harness/`](harness/), outside the package):
+`harness.graph` (load) · `harness.query` (SPARQL) · `harness.lpg` (Cypher) · `harness.merge_eval` (merge).
+Long runs use `harness.supervise` (resume-on-crash) and `harness.guard` (OS-agnostic memory guard).
 
-col = CitationCollector()            # streaming — chunk-boundary carry (TAIL_CARRY)
-col.feed(file_name, chunk_text)      # 「law name」 Article N pattern, same-law/this-law masking
-sparql = citations_insert_update(col.edges(), graph_uri + "__cites")
-```
-Emits cross-citations among statutes as document-level `:cites` edges → XGEN multi_turn_rag
-5th leg (UNION SPARQL, minimal-displacement insert). mixed measured: full multihop recovery
-dev 0.842/ho 0.700/te 0.767 (measured on an internal corpus — not external gold).
+---
 
-## Class-promotion filter (v0.9) — LLM-free over-generation cleanup
-```python
-from ontokit.filter import ClassPromotionFilter
+## Components and models
 
-f = ClassPromotionFilter(corpus_chunks=n_chunks)  # support gate auto-disabled if unknown(None) or small(<5000)
-keep, reason = f.decide(label, df=df, has_rel=..., has_kid=..., has_inst=...)
-```
-Promotion criterion (termhood): promote to class only on reuse (df≥2) or structural
-participation (relation·hierarchy-parent·instance). Junk rules use statistics + closed-class
-grammatical function words only (no domain blacklist). mixed20k measured: 444,817→70,671
-(-84.1%), relation triples 100% preserved (measured on an internal corpus). ⚠️ Also removes
-isolated df1 valid concepts (intended cost; XGEN wiring is reversible via sidecar
-`<graph>__filtered`).
-
-## Co-occurrence weak relation (v0.10) — LLM-free relation-density boost (language-agnostic)
-```python
-from ontokit.cooccurrence import CooccurrenceCollector, make_korean_label_ok
-
-col = CooccurrenceCollector(min_pair_df=3, lift_k=2.0, label_ok=make_korean_label_ok())
-col.add_chunk(chunk_id, [(uri, label), ...])   # chunk streaming
-edges = col.edges(exclude_pairs=svo_pairs)      # [(a, b, count)] — excludes SVO-linked pairs
-```
-Emits same-chunk co-occurring entity pairs as `coOccursWith` (mentioned-together) weak
-relations — deterministically boosting relation density / English coverage that SVO
-(Korean-only) can't fill. Selection is statistics only (pair df≥3 ∧ lift>2, zero lists);
-label eligibility is by morphology·POS (calendar·punctuation·numeric-token·Latin-micro·
-mixed-case fragment·particle-terminal·standalone-bound-noun·collision sink). mixed20k
-measured: 1.75%→10.5%, SVO 100% preserved, displayed junk rate ~18%.
-⚠️ Coarse relation (no type); consumers should prefer SVO + co-occ fallback slot.
-Truncated·merged fragments (`대구광역`) are beyond morphological detection (upstream NER).
-The figures above are measured on an internal corpus (not external gold).
-
-## Relation encoder (v0.13) — KLUE-RE + SREDFM-ko augmented, holdout 0.6169 (v13c)
-```bash
-pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
-export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # this env is the on/off switch
-```
-A **local RE encoder** channel that surpasses rule-based particle SVO (KLUE linkage 0.8%).
-Fine-tuned klue/roberta-small, **zero LLM API calls** (local inference, same family as NER).
-
-**Adoption history** (external gold = KLUE-RE official validation 7,765, micro-F1):
-
-| Version | holdout | Note |
+| Role | What | Note |
 |---|---|---|
-| re-ko-v1 | 0.5924 | consistent with the official roberta-small baseline 60.85 |
-| re-ko-aug-v1 | 0.6259 | SREDFM-ko augmentation |
-| re-ko-aug-v12 | 0.6274 | removed 721 unsupported P112 rows — `founded_by` 0.519→0.696 |
-| **re-ko-hard-v13c (current)** | **0.6169** | mixed in a 748-row adjudicated hard set — **field precision 43.1→51.8%** (fresh blind holdout); KLUE −1.05pt accepted by panel. Known regression: `per:colleagues` |
-| re-ko-large-v1 (opt-in) | **0.6726** | klue/roberta-large 337M (fp16) — `quality-large` profile, field precision 70.6%, build ~2.2× |
+| Morphology · classes · hierarchy | Kiwi + rules (suffix sharing · definitions · occupation lexicon) | no model |
+| Entity recognition | KoELECTRA-small (local) | coarse types (person · org · location…) |
+| Relation extraction | KLUE-RE roberta-small v13c (local, opt-in) | external-gold F1 0.6169; large 0.6726 is 2.2× slower, optional |
+| Graph store | graphstore → Fuseki (RDF) · Neo4j (LPG) | same query, same answers (210/210 × 3 graphs) |
+| Planner · reader (measurement) | Qwen3-8B 4-bit, local (MLX) | nothing leaves the machine; weaker than the product's large LLM |
+| Vector search (measurement baseline) | XGEN product search API · text-embedding-3-small | product settings as-is |
 
-`eval/relation/MODEL_LOCK.json` is the single source of truth for the adopted build
-(release_tag·sha256 pinned).
-⚠️ The **default** model is still **small** — below the official base 0.6666 / large 0.6959.
-The size upgrade was already tested and **parked** in the 0724 scaling round (`quality-large`
-opt-in 0.6726; default rollout rejected for exceeding the +30% build-cost cap).
+**Defaults** — a no-arg constructor makes 0 LLM calls and loads 0 models. Every model-backed channel (NER, relation encoder,
+English) is opt-in. Full switch table: [channel details](docs/CHANNELS.en.md#defaults--env-switches-at-a-glance).
 
-- **Invariant**: if any of env-unset·extras-not-installed·bad-path·no-NER holds, it falls
-  back to rule-based particle SVO. "It does not turn on unless installed·configured." The
-  NER (KoELECTRA) supplies entities, which are paired → relation classification.
-- **Rule-channel status** (B3): the particle-SVO channel is **availability-fallback only**.
-  Ensembling it with the encoder is **permanently rejected** — measured on holdout, rules
-  corrected 29 cases but contaminated 144 (net value negative).
-- **Model swap**: not tied to a specific model. ① change env ② retrain via
-  `eval/relation/train_encoder.py` ③ inject `relation_extractor=` ④ `.extract()` wrapper —
-  see the "Model swap" section in `eval/relation/README.md`.
-- Reproduce·evaluate: [`eval/relation/`](eval/relation/) — its README has the KLUE-RE
-  download commands, `train_encoder.py` (retrain), `eval_encoder.py` (score), and
-  `JUDGE_PROTOCOL.md` (criteria). Weights ship as GitHub Release assets (not committed;
-  sha256 in `MODEL_LOCK.json`).
+---
 
-## Definitional hierarchy·typing (v0.12~) — heterogeneous hierarchy induction (**off by default, v0.14~**)
-Induces the heterogeneous hierarchies that suffix-share is **structurally incapable** of
-catching (강아지 ⊂ 동물, 신용공여 ⊂ 거래) via definitional sentence-ending patterns
-(copula/genus/predicate/속하는). **Off by default since v0.14** — measured on a real news
-corpus (ui_news100, 538 chunks), 88.5% of the semantic `subClassOf` edges from this channel
-were false (7 true / 54 false, Wilson lower bound 0.782), caused by structural misfires on
-non-definitional predicate sentences. Opt in for encyclopedic/dictionary corpora, where the
-external-gold record below applies.
+## Limits and next steps
 
-```python
-ext = DeterministicKoreanExtractor(enable_hearst=True)   # encyclopedic opt-in (default off)
-```
-- Channel state is verifiable from build logs alone: when on, the line
-  `정의문 계층(hearst) 채널 on: 정의쌍 N건 수집` is **always** emitted (absent when off).
-- **ABox↔TBox bridge**: when a definitional subject is a NER entity, it emits `rdf:type`
-  instead of `subClassOf` — repairing isolated islands that made hierarchy reachability 0%.
-- Entirely rule-based (Kiwi morphology + ending patterns). Zero LLM calls.
-- ⚠️ **Evidence level**: the external-gold (Wikidata P279) judge loop 89/100 and the
-  real-build 615 pairs·87% precision are **self-judged development-round records** and have
-  **not yet landed as reproducible artifacts** under `eval/hierarchy/`. Read them on that basis.
+**Not measured** — Korean Wikipedia (encyclopedic register) only · local 8B reader only · gold = Wikidata facts (correct answers may be
+scored wrong; no human audit) · templated questions.
 
-## Occupation instance typing (v0.13) — P106 lexicon (on by default)
-A build-time channel that assigns occupation classes to person entities.
-
-```python
-ext = DeterministicKoreanExtractor(enable_occupation=True)   # default
-# disable: enable_occupation=False or ONTOKIT_OCCUPATION_TYPING=off
-```
-- Lexicon `data/occupation_lexicon_ko.json.gz` (4,121 pairs) — SREDFM-ko P106 surface forms +
-  Wikidata candidates kept **only on blind two-rater agreement** (348, human-verified).
-  **Bundled in the package = zero build-time network**, zero model loads, zero LLM calls.
-- Gates: person-dominance cut (homonym defense) + evidence gate
-  (`ONTOKIT_OCCUPATION_EVIDENCE=adj` default). Domain false positives 63.6%→0% measured
-  (self-measured, not external gold).
-- Multiple occupations (Galileo = physicist·mathematician) are emitted as additional records
-  → naturally supports multiple `rdf:type`.
-
-## Search improvements
-```python
-from ontokit.search import class_instances_triple, blend_score
-# #1 subClassOf* transitive closure — full enumeration of subclass instances (zero regression)
-# #2 vscore missing-floor guard — restores keyword exact-match chunk ranking
-```
-
-## XGEN injection (internal use only — external users can skip this)
-XGEN is the internal product that consumes this library. The following is its wiring note.
-```python
-# service/ontology/pipeline.py
-# before:  self.doc_extractor = DocumentOntologyExtractor(self.llm)
-# after:   self.doc_extractor = ExtractorFactory.create(config, llm=self.llm)
-#          (config ONTOLOGY_EXTRACTOR=deterministic_ko → LLM-free switch)
-```
-`ExtractorFactory` replicates XGEN's existing `RerankerFactory` pattern
-(PROVIDER_NAMES + importlib + config).
-
-## Ontology harness (v0.16, `harness/` — measurement/experiments, outside the package)
-
-Measures whether an ontokit graph **beats vector search on enumeration·aggregation·inverse-relation·
-multi-hop questions** on one fixed benchmark. The same query plan runs as SPARQL (Fuseki) and
-Cypher (Neo4j) on top of graphstore (swappable store backend).
-
-```
-question → planner (local LLM, IR JSON) → compiler (IR → SPARQL / Cypher)
-         → graphstore create_store(Fuseki RDF | Neo4j LPG) → scoring (vector upper bound · controls · bootstrap)
-```
-
-- **Queries use ontology semantics**: subclass closure (`rdf:type/rdfs:subClassOf*`), inverse-relation UNION, alias linking
-- **Benchmark**: 3,000 Korean Wikipedia leads + gold = **Wikidata facts actually stated in the text** (tool-independent);
-  210 questions in 7 forms, deterministic + hash-pinned. Vector search is scored at its **upper bound** (favours vector)
-- **Controls**: oracle graph (positive) · placebo (negative, bijective shuffle); valid run = oracle ≥ 0.90, placebo ≤ 0.15
-- **Schema-discovery mode** (`harness/discover.py`): plans over an existing store's real predicates — attaches to XGEN product graphs
-
-**Results (mean over 180 structural questions, max 1.0)**
-
-| Graph | Score | vs vector upper bound V40 (0.162) [95% CI] |
+| Priority | Task | Why |
 |---|---|---|
-| gold graph + real planner | **0.879** | **+0.717 [+0.652, +0.779]** |
-| ontokit — round 1 (v0.15 defaults + encoder) | 0.018 | −0.144 |
-| ontokit — round 5 (v0.16 opt-ins + definitional channel) | **0.128** | −0.033 [−0.086, +0.019] |
-| current XGEN product graph (same docs) | 0.040 | −0.121 |
+| 1 | Put "graph-result merge" into the product RAG path | the only validated gain is not in the product yet |
+| 2 | Align the class vocabulary (import a taxonomy — e.g. a product category tree) | 21/30 superclass questions use names absent from the graph |
+| 3 | Gold sets on Lotte / news documents | results so far are encyclopedic only |
+| 4 | Re-measure with a larger reader | does the gain survive at product scale |
+| 5 | Extraction recall | relations 16.7% · types 11.5% set the ceiling |
 
-- **The harness is validated**: a correct graph beats vector search by a wide margin. RDF·LPG parity 210/210 (3 graphs).
-- **ontokit does not yet beat the vector upper bound**: 7× improvement over five rounds (relation-fact recall 1.6→16.7%,
-  type 4.8→11.5%) but short of the pre-declared +0.15 → **hypothesis H1 (win with LLM-free extraction) failed**.
-- Round 6 onward tests H2 (local-LLM schema-guided extraction, zero external API).
-- ⚠️ The definitional channel is encyclopedic-register only; do not generalize Wikipedia results to other registers.
+---
 
-Per-round pre-declarations, results and what was *not* measured: [`harness/docs/`](harness/docs/) (Korean).
+## More
 
-## Structure
+<details>
+<summary><b>Per-version channels and behavior changes</b> (expand)</summary>
+
+| Version | Change | Details |
+|---|---|---|
+| v0.16 | Four opt-in relation-encoder channels (dropped-subject restoration · per-sentence pair cap · location relations · institution-name candidates), concept-gate no-op warning. **No default behavior change** | [defaults · switches](docs/CHANNELS.en.md#defaults--env-switches-at-a-glance) |
+| v0.15 | QDT ghost gate **on by default** (blocks quantity/date entities in no relation) | [language support · behavior changes](docs/CHANNELS.en.md#language-support-matrix-v0160-stated-honestly) |
+| v0.14 | Definitional channel **off by default** (88.5% false on news) | [definitional hierarchy](docs/CHANNELS.en.md#definitional-hierarchytyping-v012--heterogeneous-hierarchy-induction-off-by-default-v014) |
+| v0.13 | Relation encoder (KLUE-RE) · occupation typing (P106, on) · English spaCy relations | [relation encoder](docs/CHANNELS.en.md#relation-encoder-v013--klue-re--sredfm-ko-augmented-holdout-06169-v13c) · [occupation typing](docs/CHANNELS.en.md#occupation-instance-typing-v013--p106-lexicon-on-by-default) |
+| v0.12 | Definitional hierarchy · typing | [definitional hierarchy](docs/CHANNELS.en.md#definitional-hierarchytyping-v012--heterogeneous-hierarchy-induction-off-by-default-v014) |
+| v0.10 | Co-occurrence weak relation | [co-occurrence](docs/CHANNELS.en.md#co-occurrence-weak-relation-v010--llm-free-relation-density-boost-language-agnostic) |
+| v0.9 | Class-promotion filter | [class promotion](docs/CHANNELS.en.md#class-promotion-filter-v09--llm-free-over-generation-cleanup) |
+| v0.8 | Citation ontology (`:cites`) | [citations](docs/CHANNELS.en.md#citation-ontology-v08--doc-level-cites) |
+
+</details>
+
+<details>
+<summary><b>Quality evidence — measured on external public data</b> (expand)</summary>
+
+| Axis | External gold | Result |
+|---|---|---|
+| Relations | KLUE-RE official validation 7,765 | micro-F1 **0.6169** (v13c) · large 0.6726 |
+| Entity resolution | Korean Wikipedia redirects | F1 0.776 — below the 0.80 gate, not shipped |
+| Hierarchy | Wikidata P279 + Korean Wikipedia | reproducible artifacts not landed — in-repo judge records only |
+
+How to reproduce and what is still weakly evidenced: [quality evidence](docs/CHANNELS.en.md#quality-evidence--only-what-you-can-reproduce)
+
+</details>
+
+<details>
+<summary><b>Code layout</b> (expand)</summary>
+
 ```
 src/ontokit/
 ├── protocols.py          # injection interfaces (Extractor/GraphStore/VectorStore/LLM)
@@ -326,76 +205,36 @@ src/ontokit/
 │                         #   relation_ko (particle SVO) / relation_encoder_ko (KLUE-RE, opt-in)
 │                         #   relation_en (spaCy dep SVO, opt-in) / relation_hybrid (⚠️LLM, injection-only)
 ├── morphology/           # kiwi_nouns (Korean) + en_nouns (English nltk POS)
-├── hierarchy/            # suffix_share (main engine, ko=char/en=word), hearst_ko (definitional, off by default v0.14~)
-├── instance_typing/      # occupation (P106 lexicon, on by default) + evidence + hygiene (v0.13)
-├── ner/                  # koelectra (ko) + english (dslim BERT MIT) + ensemble·span_align
+├── hierarchy/            # suffix_share (main engine), hearst_ko (definitional, off by default v0.14~)
+├── instance_typing/      # occupation (P106 lexicon, on) + evidence + hygiene
+├── ner/                  # koelectra (ko) + english (dslim BERT) + ensemble·span_align
 │                         #   word_boundary·suffix_fragment (experimental, off)
-├── dedup/                # deterministic (morphology) + synonym_dict (Urimalsaem, opt-in)
-│                         #   class_synonyms (TBox candidate proposal — no merge, offline review)
-├── citations.py          # doc-level :cites citation collection·SPARQL emit (v0.8)
-├── filter/               # class_promotion — termhood promotion gate (v0.9)
-│                         #   concept_gate — P279 concept gate (off, parked)
-├── cooccurrence.py       # coOccursWith co-occurrence weak relation — density boost (v0.10)
-└── search/               # improvements (subClassOf*, floor guard) — ⚠️XGEN-specific
+├── dedup/                # deterministic (morphology) + synonym_dict (Urimalsaem, opt-in) + class_synonyms
+├── citations.py          # doc-level :cites (v0.8)
+├── filter/               # class_promotion (v0.9) · concept_gate (P279, off)
+├── cooccurrence.py       # coOccursWith co-occurrence weak relation (v0.10)
+└── search/               # improvements (subClassOf*, floor guard) — XGEN-specific
 
-harness/                  # ontology harness — outside the package (not installed); see below
+harness/                  # ontology harness — outside the package (not installed): bench · query · reading · scoring · controls
+docs/                     # channel details (CHANNELS.en.md), README figures (img/, regenerate with make_figures.py)
 ```
 
-## Quality evidence — only what you can reproduce
+Design principles — **zero core dependencies** (models and backends are extras) · **protocol injection**
+(`Extractor`/`GraphStore`/`VectorStore`/`LLM`) · **single source** (improvements live in the library, A/B via switches).
+Why deterministic and LLM-free (audit · reproducibility · data control · provenance), the input contract (already parsed and chunked text —
+no PDF/HWP parsing), and all install extras: [overview · design rationale](docs/CHANNELS.en.md#overview--design-rationale-former-readme-intro).
 
-Performance claims are measured **on external public datasets only**. Self-made synthetic GT
-is banned, because on the hierarchy axis it collapsed from **synthetic-GT F1 0.96 to
-external-gold 0.33**. Everything below is reproducible from within this repo.
+</details>
 
-| Axis | External gold | License | Result | Reproduce |
-|---|---|---|---|---|
-| **Relation** | KLUE-RE (official validation 7,765) | CC BY-SA 4.0 | holdout micro-F1 **0.6169** (current v13c · v12 0.6274 · large 0.6726) | [`eval/relation/`](eval/relation/) |
-| **Hierarchy** | Wikidata P279 + Korean Wikipedia lead | CC0 | ⚠️ see caveat below | [`eval/hierarchy/`](eval/hierarchy/) |
-| **Entity resolution (ER)** | Korean Wikipedia redirects | CC BY-SA 4.0 | balanced F1 **0.776** — **below** the 0.80 gate | [`eval/entity_resolution/`](eval/entity_resolution/) |
-| Fine-grained typing | (self-measured) | — | **discarded** — 0.16% retyped, no effect | [`eval/instance_typing/`](eval/instance_typing/) |
+---
 
-Each directory's README carries the data-download commands, evaluation scripts, and
-decision criteria. E.g. reproducing the relation axis:
-```bash
-cd eval/relation && cat README.md      # includes curl commands for the KLUE-RE parquet
-python eval_encoder.py holdout
-```
-
-### ⚠️ Stated honestly — what is still weakly evidenced
-
-- **Register dependence of the definitional channel (measured 2026-08)**: all validation
-  above is on encyclopedic/dictionary text. On a real news-corpus graph (ui_news100),
-  **88.5% of its semantic `subClassOf` edges were false** (66 edges fully adjudicated:
-  7 true / 54 false / 5 undecidable) — hence the v0.14 default-off. Suffix-share-derived
-  hierarchy (75% of all edges) is same-kind hierarchy of the form X기관⊂기관 — a
-  morphological rule, not semantically validated. Do not read this as "the hierarchy is
-  verified".
-- **Hierarchy sparsity under v0.14 defaults (e2e measured 2026-08-10, news register)**:
-  a full build of ui_news100 (538 news chunks) with default settings yields **43
-  `subClassOf` edges** and **58/3,381 (1.7%) hierarchy-participating classes** — 98.3%
-  of classes are isolated. No false hierarchy, but very little hierarchy. This is a
-  news-register measurement and register-dependent (finreg 489, legal register, yields
-  1,710 suffix-share edges). Judge the channel by these numbers if you need hierarchy
-  on news-like corpora.
-- **Hierarchy 89/100 and definitional 615 pairs·87% precision** are **self-judged
-  development-round records**. The result log in `eval/hierarchy/README.md` only contains
-  R0 26/100 and "R1 in progress"; the artifacts backing 89/100 have **not landed yet**.
-- **Every "NN/100 judge" score comes from an in-repo judge loop** (protocols in
-  `eval/*/JUDGE_PROTOCOL.md`), not external re-scoring. Only two numbers are anchored
-  directly to external gold: relation holdout (0.6169, v13c) and ER (0.776).
-- **ER is not shipped.** Embeddings cannot separate synonymy from topical proximity
-  (AUC ceiling ~0.81), so it missed the gate and was deliberately left unwired. Default dedup
-  is morphology-based; dictionary merging is opt-in via `ONTOKIT_SYNONYM_DICT`.
-- **English is structurally tested only** (no corpus measurement). Korean = finreg 489 measured.
-
-## Adding as a dependency (install from GitHub)
-
-The repo is public, so it installs **without authentication**:
+## Install · add as a dependency
 
 ```bash
+pip install xgen-ontokit                       # core (no dependencies)
+pip install "xgen-ontokit[all]"                # everything (Kiwi · NER · relation encoder · English)
 pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
 ```
-⚠️ The latest tag on the remote is currently **v0.13.1** (v0.14.0–v0.16.0 tags not pushed). Until the tag
-is pushed the command above fails — pin a commit SHA instead (`...xgen-ontokit.git@<commit>`).
-Pinning is recommended — on-by-default channels have changed across minor versions (see the
-behavior-change notes above). Add the URL to your `pyproject.toml` dependencies or requirements.
+
+⚠️ The latest tag on the remote is currently **v0.13.1** (v0.14.0–v0.16.0 not pushed) — until they are, the last command fails;
+pin a commit SHA instead (`...xgen-ontokit.git@<commit>`). On-by-default channels have changed across minor versions, so pin a version.
