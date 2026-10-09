@@ -20,18 +20,14 @@ import urllib.request
 
 from harness import vector
 from harness.run import score_nodes
+from ontokit.merge import graph_block
 
-K, CHARS, GRAPH_MAX = 40, 600, 150
+K, CHARS = 40, 600
 
 
 def read(q, hits, graph_items):
     ctx = "\n\n".join(f"[문서 {i + 1}] {h['title']}\n{h['text'][:CHARS]}" for i, h in enumerate(hits))
-    gblock = ""
-    if graph_items:
-        names = ", ".join(graph_items[:GRAPH_MAX])
-        more = f" 외 {len(graph_items) - GRAPH_MAX}개" if len(graph_items) > GRAPH_MAX else ""
-        gblock = (f"[지식그래프 질의 결과 — 문서 모음 전체에서 조건에 맞는 항목 {len(graph_items)}개]\n"
-                  f"{names}{more}\n(그래프는 자동 추출이라 누락·오류가 있을 수 있다. 문서와 대조해 판단하라.)\n\n")
+    gblock = graph_block(graph_items)   # 라이브러리가 정본(ontokit.merge, harness/docs/S01)
     want = ('{"count": 정수, "answers": [근거 항목 이름...]}' if q["form"] == "A" else '{"answers": [이름, ...]}')
     # 그래프 블록을 문서 뒤에 둔다 — 팔 사이 프롬프트 앞부분이 같아 판독기 KV 캐시를 재사용한다
     prompt = (f"아래 자료만 근거로 질문에 답하라. 자료에 없는 것은 쓰지 마라. JSON 하나만 출력: {want}\n\n"
