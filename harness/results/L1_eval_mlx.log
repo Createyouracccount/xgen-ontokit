@@ -32,48 +32,48 @@
 Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
   File "<frozen runpy>", line 88, in _run_code
-  File "/Users/kimdu/company/xgen-levelup/xgen-ontokit/harness/hybrid.py", line 113, in <module>
+  File "harness/hybrid.py", line 113, in <module>
     asyncio.run(main())
     ~~~~~~~~~~~^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/asyncio/runners.py", line 195, in run
+  File "<python>/asyncio/runners.py", line 195, in run
     return runner.run(main)
            ~~~~~~~~~~^^^^^^
-  File "/opt/miniconda3/lib/python3.13/asyncio/runners.py", line 118, in run
+  File "<python>/asyncio/runners.py", line 118, in run
     return self._loop.run_until_complete(task)
            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "/opt/miniconda3/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+  File "<python>/asyncio/base_events.py", line 725, in run_until_complete
     return future.result()
            ~~~~~~~~~~~~~^^
-  File "/Users/kimdu/company/xgen-levelup/xgen-ontokit/harness/hybrid.py", line 79, in main
+  File "harness/hybrid.py", line 79, in main
     hits = vector.search(a.vec, q["q"], K)
-  File "/Users/kimdu/company/xgen-levelup/xgen-ontokit/harness/vector.py", line 77, in search
+  File "harness/vector.py", line 77, in search
     res = json.load(urllib.request.urlopen(req, timeout=120)).get("results", [])
                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 189, in urlopen
+  File "<python>/urllib/request.py", line 189, in urlopen
     return opener.open(url, data, timeout)
            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 489, in open
+  File "<python>/urllib/request.py", line 489, in open
     response = self._open(req, data)
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 506, in _open
+  File "<python>/urllib/request.py", line 506, in _open
     result = self._call_chain(self.handle_open, protocol, protocol +
                               '_open', req)
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 466, in _call_chain
+  File "<python>/urllib/request.py", line 466, in _call_chain
     result = func(*args)
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 1348, in http_open
+  File "<python>/urllib/request.py", line 1348, in http_open
     return self.do_open(http.client.HTTPConnection, req)
            ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/urllib/request.py", line 1323, in do_open
+  File "<python>/urllib/request.py", line 1323, in do_open
     r = h.getresponse()
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 1430, in getresponse
+  File "<python>/http/client.py", line 1430, in getresponse
     response.begin()
     ~~~~~~~~~~~~~~^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 331, in begin
+  File "<python>/http/client.py", line 331, in begin
     version, status, reason = self._read_status()
                               ~~~~~~~~~~~~~~~~~^^
-  File "/opt/miniconda3/lib/python3.13/http/client.py", line 292, in _read_status
+  File "<python>/http/client.py", line 292, in _read_status
     line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/miniconda3/lib/python3.13/socket.py", line 719, in readinto
+  File "<python>/socket.py", line 719, in readinto
     return self._sock.recv_into(b)
            ~~~~~~~~~~~~~~~~~~~~^^^
 TimeoutError: timed out
