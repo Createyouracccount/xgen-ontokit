@@ -104,3 +104,58 @@ def test_harness_uses_library_objects():
     assert hg.ontokit_graph is og.project and hg.KLUE_MAP is og.KLUE_MAP
     assert hq.Compiler is oq.Compiler and hq.run_plan is oq.run_plan
     assert hm.merge is om.merge and hh.graph_block is om.graph_block
+
+
+def test_cli_query_roundtrip_ttl_with_sources(tmp_path, capsys):
+    """build 산출물(TTL)을 다시 읽어도 같은 답 + 출처 문서가 붙는다."""
+    import json
+    from ontokit.cli import main
+    g, _ = project(RAW, DOCS)
+    ttl = tmp_path / "g.ttl"
+    g.serialize(ttl, format="turtle")
+    main(["query", str(ttl), json.dumps({"op": "list", "return": "x", "where": [{"t": "isa", "v": "x", "class": "인물"}]})])
+    out = json.loads(capsys.readouterr().out)
+    assert out["count"] == 1 and out["nodes"][0]["name"] == "김가수" and out["nodes"][0]["docs"] == ["d1"]
+
+
+def test_cli_ask_fails_loudly_without_llm(tmp_path, monkeypatch):
+    from ontokit.cli import main
+    monkeypatch.delenv("ONTOKIT_LLM_URL", raising=False)
+    monkeypatch.delenv("ONTOKIT_LLM_MODEL", raising=False)
+    g, _ = project(RAW, DOCS)
+    ttl = tmp_path / "g.ttl"
+    g.serialize(ttl, format="turtle")
+    with pytest.raises(SystemExit, match="LLM 이 필요"):
+        main(["ask", str(ttl), "가수는?"])
+
+
+def test_planner_parse_strict():
+    from ontokit.planner import PROMPT, parse
+    assert "per:place_of_birth: 출생지" in PROMPT and PROMPT.endswith("질문: ")
+    assert parse('<think>x</think>```json\n{"op":"list","where":[]}\n```') == {"op": "list", "where": [], "return": "x"}
+    with pytest.raises(ValueError):
+        parse('{"op": "list", "where": [')   # 잘린 JSON — 빈 계획으로 바꾸지 않는다
+
+
+def test_chunk_text_respects_ner_window():
+    from ontokit.pipeline import CHUNK_CHARS, chunk_text
+    assert chunk_text("") == [] and chunk_text("  \n\n ") == []
+    long_para = "가나다라마바사. " * 400            # 한 문단 3,200자
+    chunks = chunk_text("짧은 문단\n\n" + long_para)
+    assert all(len(c) <= CHUNK_CHARS for c in chunks) and len(chunks) >= 3
+    assert "".join(chunks).replace("\n", "").replace(" ", "") == ("짧은 문단" + long_para).replace(" ", "")
+
+
+def test_oxigraph_store_matches_memory():
+    pytest.importorskip("pyoxigraph")
+    import asyncio
+    from ontokit.backends.oxigraph import OxigraphStore
+    from ontokit.query import run_plan
+    g, _ = project(RAW, DOCS)
+    st = OxigraphStore()
+    assert st.load(g, "urn:t") == len(g)
+    for p in ({"op": "list", "return": "x", "where": [{"t": "isa", "v": "x", "class": "인물"}]},
+              {"op": "list", "return": "y",
+               "where": [{"t": "rel", "s": {"const": "김가수"}, "p": "per:employee_of", "o": {"var": "y"}}]}):
+        assert asyncio.run(run_plan(st, p, "urn:t"))["nodes"] == run(g, p)["nodes"]
+    assert st.load(g, "urn:t") == len(g)   # 같은 이름으로 다시 실으면 교체(누적 아님)

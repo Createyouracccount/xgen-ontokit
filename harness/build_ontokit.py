@@ -14,27 +14,14 @@ def main():
     docs_path, out = sys.argv[1], sys.argv[2]
     import torch
     torch.set_num_threads(int(os.getenv("HARNESS_TORCH_THREADS", "4")))  # 0904 실측: 4스레드 최적
-    from ontokit.builder.ontology_builder import OntologyBuilder
-    from ontokit.ner.koelectra import KoElectraNER
+    from ontokit.pipeline import extract   # ontokit build CLI 와 같은 경로(harness/docs/S01)
 
     docs = [json.loads(l) for l in open(docs_path)]
-    # 문서 단위로 넘긴다 — 키는 doc_id(제목 중복 방지), 청크 id 는 doc_id#index
-    payload = {}
-    for d in docs:
-        payload.setdefault(d["doc_id"], []).append(
-            {"chunk_id": f'{d["doc_id"]}#{d["chunk_index"]}', "chunk_text": d["text"],
-             "chunk_index": d["chunk_index"]})
-    # 제품 어댑터(feature/ontology-extractor-axis-0903 ontokit_extractor.py)와 같은 구성.
-    # 코퍼스가 한국어라 영어 NER 은 생략(로드 비용만 큼).
     # HARNESS_HEARST=1 → ontokit 정의문 채널(enable_hearst) opt-in(3차). 백과체 전용 권장 채널.
-    ner = KoElectraNER()
-    extractor = None
-    if os.getenv("HARNESS_HEARST") == "1":
-        from ontokit import DeterministicKoreanExtractor
-        extractor = DeterministicKoreanExtractor(ner=ner, enable_hearst=True)
-    builder = OntologyBuilder(extractor=extractor, ner=ner)
     t0 = time.time()
-    concepts, entities, relations, data = asyncio.run(builder.build(payload))
+    raw = asyncio.run(extract(docs, hearst=os.getenv("HARNESS_HEARST") == "1"))
+    concepts, entities, relations, data = (raw["concepts"], raw["ner_entities"], raw["relations"],
+                                           raw["data_properties"])
     sec = time.time() - t0
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump({"concepts": concepts, "ner_entities": entities, "relations": relations,

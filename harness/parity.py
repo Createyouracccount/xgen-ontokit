@@ -15,6 +15,9 @@ from harness.run import score_nodes
 
 
 def neo4j():
+    # LPG 쪽만 graphstore(Neo4j 백엔드)를 쓴다 — 선택 의존. 경로: env GRAPHSTORE_SRC
+    sys.path.insert(0, os.getenv("GRAPHSTORE_SRC", os.path.join(
+        os.path.dirname(__file__), "..", "..", "develop", "xgen-graphstore", "src")))
     from xgen_graphstore import create_store
     pw = open(os.path.join(os.path.dirname(__file__), "data", ".neo4j_pass")).read().strip()
     return create_store({"backend": "neo4j", "uri": "bolt://localhost:7687",
@@ -28,7 +31,7 @@ async def main():
     g = oracle_graph(data, docs) if arm in ("oracle", "placebo") else ontokit_graph(data, docs)[0]
     if arm == "placebo":
         g = oracle_graph(data, docs, placebo=True)
-    fz = store()   # store() 가 graphstore 경로를 sys.path 에 올린다
+    fz = store()
     nj = neo4j()
     n_nodes, n_edges, _ = await lpg_load(g, arm, nj)
     qs = json.load(open(bench))

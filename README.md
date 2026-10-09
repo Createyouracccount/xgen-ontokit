@@ -6,7 +6,7 @@
 "모두 나열해줘 · 몇 개야 · 누가 누구와" 질문의 답을 보태는 라이브러리.**
 
 - **만든다** — 문서 청크 → 개체·타입·관계·`subClassOf` 계층. 형태소·규칙·로컬 소형 모델만 쓴다(LLM 0회, 문서 외부 유출 0, 같은 입력 → 같은 그래프).
-- **싣는다** — 그래프 DB 를 가리지 않는다. 같은 질의가 Fuseki(RDF/SPARQL)와 Neo4j(LPG/Cypher)에서 같은 답을 낸다([graphstore](https://github.com/Createyouracccount/xgen-graphstore) 경유).
+- **싣는다** — 서버 없이 돈다(인메모리 rdflib · 내장 Oxigraph). 같은 질의가 Fuseki(RDF/SPARQL)·Neo4j(LPG/Cypher)에서도 같은 답을 낸다 — 서버는 선택이다([독립 실행](docs/STANDALONE.md)).
 - **쓴다** — 질문을 그래프 질의로 바꿔 결과를 **벡터 검색 답에 병합**한다. 이것이 실제 답을 개선한 유일하게 검증된 방식이다.
 
 ---
@@ -121,9 +121,17 @@ concepts, entities, relations, _ = asyncio.run(ext.extract(documents))
 # 모든 산출물에 source_chunks(어느 청크에서 왔나)가 붙는다
 ```
 
-그래프 적재 → 질의 → 병합까지의 실행은 측정 하네스([`harness/`](harness/), 패키지 밖)에 있다:
-`harness.graph`(적재) · `harness.query`(SPARQL) · `harness.lpg`(Cypher) · `harness.merge_eval`(병합).
-장시간 측정은 `harness.supervise`(이어하기 재시작)·`harness.guard`(메모리 가드, OS 무관)로 돌린다.
+**그래프 → 질의 → 병합**(L02 에서 검증된 경로)도 서버·도커 없이 라이브러리로 돈다 — 상세는 [독립 실행](docs/STANDALONE.md):
+
+```bash
+pip install "xgen-ontokit[korean,ner,owl]"
+ontokit build docs.jsonl -o graph.ttl            # LLM 0회. 출처 문서 포함
+ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","class":"가수"}]}'
+```
+
+`ontokit.graph`(투영) · `ontokit.query`(계획 → SPARQL, 인메모리·Oxigraph·원격) · `ontokit.merge`(판독 답에 그래프 결과 병합).
+측정 하네스([`harness/`](harness/), 패키지 밖)는 이 모듈을 그대로 쓰며, 옮긴 뒤에도 L02 수치가 문항 단위로 같다
+([S01](harness/docs/S01_라이브러리승격_동등성.md)). 장시간 측정은 `harness.supervise`·`harness.guard` 로 돌린다.
 
 ---
 
@@ -134,7 +142,7 @@ concepts, entities, relations, _ = asyncio.run(ext.extract(documents))
 | 형태소·클래스·계층 | Kiwi + 규칙(접미 공유·정의문·직업 어휘집) | 모델 없음 |
 | 개체 인식 | KoELECTRA-small (로컬) | 타입이 거칠다(인물·기관·지역…) |
 | 관계 추출 | KLUE-RE roberta-small v13c (로컬, opt-in) | 외부 정답 F1 0.6169. large 0.6726 은 2.2배 느려 선택형 |
-| 그래프 저장소 | graphstore → Fuseki(RDF) · Neo4j(LPG) | 같은 질의 같은 답(210/210 × 그래프 3종) |
+| 그래프 저장소 | 인메모리(rdflib) · 내장 Oxigraph — 서버 없음. 측정 당시 Fuseki · Neo4j(LPG, graphstore 경유) | 같은 질의 같은 답(문항 단위 — [S01](harness/docs/S01_라이브러리승격_동등성.md)) |
 | 계획기·판독기 (측정) | Qwen3-8B 4비트, 로컬(MLX) | 외부 전송 0. 제품의 대형 LLM 보다 약하다 |
 | 벡터 검색 (측정 기준선) | XGEN 제품 검색 API · text-embedding-3-small | 제품 설정 그대로 |
 

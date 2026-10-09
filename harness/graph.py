@@ -1,5 +1,5 @@
 """그래프 팔 생성·적재 — 같은 스키마(harness.schema)로 오라클·위약·ontokit 그래프를 만들고
-graphstore 를 통해 백엔드에 싣는다. 백엔드 교체는 graphstore 의 create_store 한 곳.
+내장 저장소(Oxigraph, 서버 없음)에 싣는다. L02 까지는 Fuseki 였다 — 같은 답임을 S01 §5 에서 확인하고 교체.
 
   python -m harness.graph load <run> <arm> <facts|ontokit_raw.json> [docs.jsonl]
     arm ∈ oracle | placebo | ontokit
@@ -100,14 +100,12 @@ def oracle_graph(facts, docs, placebo=False, seed=7, legacy_placebo=False):
     return g
 
 
-def store(dataset="ontoharness"):
-    """graphstore 로 백엔드 생성. 백엔드는 env GRAPHSTORE_BACKEND(기본 fuseki)."""
-    sys.path.insert(0, os.getenv("GRAPHSTORE_SRC", os.path.join(
-        os.path.dirname(__file__), "..", "..", "develop", "xgen-graphstore", "src")))
-    from xgen_graphstore import create_store
-    return create_store({"base_url": os.getenv("FUSEKI_URL", "http://localhost:3030"),
-                         "dataset": dataset,
-                         "password": os.getenv("FUSEKI_ADMIN_PASSWORD")})
+def store(write=False):
+    """측정 그래프 저장소 — Oxigraph 디렉터리(env HARNESS_GRAPH_DIR, 기본 harness/data/graphs).
+    측정은 읽기 전용으로 열어 여러 갈래(--shard)가 동시에 읽는다. 쓰기는 load 만."""
+    from ontokit.backends.oxigraph import OxigraphStore
+    path = os.getenv("HARNESS_GRAPH_DIR", os.path.join(os.path.dirname(__file__), "data", "graphs"))
+    return OxigraphStore(path, read_only=not write)
 
 
 def graph_name(run, arm):
@@ -115,20 +113,9 @@ def graph_name(run, arm):
 
 
 async def load(g, run, arm):
-    st = store()
-    assert await st.ensure_dataset(), "데이터셋 생성 실패"
-    gn = graph_name(run, arm)
-    await st.clear_graph(gn)
-    nt = g.serialize(format="nt")
-    lines = nt.splitlines()
-    for i in range(0, len(lines), 50000):
-        r = await st.upload_ttl("\n".join(lines[i:i + 50000]) + "\n", graph_name=gn)
-        if not r.get("success"):
-            raise RuntimeError(f"업로드 실패: {r}")
-    n = await st.get_triple_count(gn)
+    st = store(write=True)
+    n = st.load(g, graph_name(run, arm))   # 같은 이름은 교체, 트리플 수 불일치면 예외
     await st.close()
-    if n != len(g):  # 적재 손실을 조용히 넘기지 않는다
-        raise RuntimeError(f"트리플 수 불일치: 로컬 {len(g)} vs 저장소 {n}")
     return n
 
 
