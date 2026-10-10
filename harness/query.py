@@ -1,4 +1,4 @@
-"""질의계획(IR) → SPARQL 컴파일·실행. 온톨로지 의미를 질의 시점에 쓴다.
+"""질의계획(IR) → SPARQL 컴파일·실행 — 구현은 `ontokit.query`. 여기는 하네스 CLI 만 남는다.
 
 IR:
   {"op": "list"|"count", "return": "x"|"y",
@@ -15,80 +15,8 @@ import asyncio
 import json
 import sys
 
-from harness import schema as S
-
-PFX = f"""PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-PREFIX oh: <{S.NS}>
-"""
-
-
-def _lit(s):
-    return json.dumps(s, ensure_ascii=False)
-
-
-class Compiler:
-    def __init__(self):
-        self.n = 0
-
-    def fresh(self):
-        self.n += 1
-        return f"?k{self.n}"
-
-    def term(self, t, lines):
-        if isinstance(t, str):
-            return f"?{t}"
-        if "var" in t:
-            return f"?{t['var']}"
-        v = self.fresh()
-        lines.append(f"{v} oh:nkey {_lit(S.norm(t['const']))} .")
-        return v
-
-    def compile(self, plan, graph):
-        lines, vars_ = [], set()
-        for c in plan["where"]:
-            if c["t"] == "isa":
-                cv = self.fresh()
-                lines.append(f"?{c['v']} rdf:type/rdfs:subClassOf* {cv} . {cv} oh:nkey {_lit(S.norm(c['class']))} .")
-                vars_.add(c["v"])
-            elif c["t"] == "rel":
-                s, o = self.term(c["s"], lines), self.term(c["o"], lines)
-                for t in (c["s"], c["o"]):
-                    if isinstance(t, str):
-                        vars_.add(t)
-                    elif "var" in t:
-                        vars_.add(t["var"])
-                p = c["p"]
-                if p not in S.RELATIONS:
-                    raise ValueError(f"알 수 없는 관계: {p}")
-                inv = S.RELATIONS[p][4]
-                fwd = f"{s} <{S.rel_uri(p)}> {o} ."
-                if inv and inv != p:
-                    lines.append(f"{{ {fwd} }} UNION {{ {o} <{S.rel_uri(inv)}> {s} . }}")
-                elif inv == p:  # 대칭
-                    lines.append(f"{{ {fwd} }} UNION {{ {o} <{S.rel_uri(p)}> {s} . }}")
-                else:
-                    lines.append(fwd)
-            else:
-                raise ValueError(f"알 수 없는 조건: {c}")
-        if "x" in vars_:
-            lines.append("?xd oh:describes ?x .")
-        r = plan["return"]
-        body = "\n    ".join(lines)
-        return (PFX + f"SELECT DISTINCT ?{r} ?lab WHERE {{ GRAPH <{graph}> {{\n    {body}\n"
-                f"    ?{r} (rdfs:label|skos:altLabel) ?lab .\n}} }}")
-
-
-async def run_plan(st, plan, graph):
-    q = Compiler().compile(plan, graph)
-    res = await st.sparql_query(q)
-    if res is None or "results" not in res:
-        raise RuntimeError(f"SPARQL 실패(빈 응답) — 그래프 결과 0 과 구분: {str(res)[:200]}")
-    nodes = {}
-    for b in res["results"]["bindings"]:
-        nodes.setdefault(b[plan["return"]]["value"], []).append(b["lab"]["value"])
-    return {"nodes": [{"uri": u, "names": ls} for u, ls in nodes.items()], "sparql": q}
+# 컴파일러·실행은 라이브러리가 정본이다(harness/docs/S01 동등성 증명).
+from ontokit.query import PFX, Compiler, run_plan  # noqa: F401
 
 
 if __name__ == "__main__":

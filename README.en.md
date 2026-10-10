@@ -7,8 +7,8 @@ answers to the questions vector search cannot handle — "list them all · how m
 
 - **Build** — document chunks → entities, types, relations, `subClassOf` hierarchy. Morphology, rules and small local models only
   (0 LLM calls, nothing leaves the machine, same input → same graph).
-- **Store** — graph-DB agnostic. The same query returns the same answers on Fuseki (RDF/SPARQL) and Neo4j (LPG/Cypher)
-  (via [graphstore](https://github.com/Createyouracccount/xgen-graphstore)).
+- **Store** — runs without a server (in-memory rdflib · embedded Oxigraph). The same query also returns the same answers
+  on Fuseki (RDF/SPARQL) and Neo4j (LPG/Cypher) — a server is optional ([standalone guide, Korean](docs/STANDALONE.md)).
 - **Use** — turn a question into a graph query and **merge the results into the vector-search answer**. This is the only way
   of using the graph that has been shown to improve real answers.
 
@@ -127,8 +127,18 @@ concepts, entities, relations, _ = asyncio.run(ext.extract(documents))
 # every output carries source_chunks (which chunk it came from)
 ```
 
-Loading, querying and merging live in the measurement harness ([`harness/`](harness/), outside the package):
-`harness.graph` (load) · `harness.query` (SPARQL) · `harness.lpg` (Cypher) · `harness.merge_eval` (merge).
+**Graph → query → merge** (the path validated in L02) also runs from the library, with no server or Docker —
+see the [standalone guide (Korean)](docs/STANDALONE.md):
+
+```bash
+pip install "xgen-ontokit[korean,ner,owl]"
+ontokit build docs.jsonl -o graph.ttl            # zero LLM calls, source documents attached
+ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","class":"가수"}]}'
+```
+
+`ontokit.graph` (projection) · `ontokit.query` (plan → SPARQL; in-memory, Oxigraph, remote) · `ontokit.backends.cypher` (same plan → Neo4j) · `ontokit.merge` (merge graph
+results into the reader's answer). The measurement harness ([`harness/`](harness/), outside the package) uses these modules
+as-is, and reproduces the L02 numbers question by question after the move ([S01](harness/docs/S01_라이브러리승격_동등성.md)).
 Long runs use `harness.supervise` (resume-on-crash) and `harness.guard` (OS-agnostic memory guard).
 
 ---
@@ -140,7 +150,7 @@ Long runs use `harness.supervise` (resume-on-crash) and `harness.guard` (OS-agno
 | Morphology · classes · hierarchy | Kiwi + rules (suffix sharing · definitions · occupation lexicon) | no model |
 | Entity recognition | KoELECTRA-small (local) | coarse types (person · org · location…) |
 | Relation extraction | KLUE-RE roberta-small v13c (local, opt-in) | external-gold F1 0.6169; large 0.6726 is 2.2× slower, optional |
-| Graph store | graphstore → Fuseki (RDF) · Neo4j (LPG) | same query, same answers (210/210 × 3 graphs) |
+| Graph store | in-memory (rdflib) · embedded Oxigraph — no server · optional: Neo4j (Cypher, driver only). At measurement time: Fuseki | same query, same answers (per question — [S01](harness/docs/S01_라이브러리승격_동등성.md)) |
 | Planner · reader (measurement) | Qwen3-8B 4-bit, local (MLX) | nothing leaves the machine; weaker than the product's large LLM |
 | Vector search (measurement baseline) | XGEN product search API · text-embedding-3-small | product settings as-is |
 

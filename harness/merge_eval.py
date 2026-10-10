@@ -11,6 +11,7 @@ import asyncio
 import json
 
 from harness.run import score_nodes
+from ontokit.merge import merge   # 병합 규칙은 라이브러리가 정본(harness/docs/S01)
 
 
 async def main():
@@ -40,12 +41,12 @@ async def main():
                     nodes = (await run_plan(st, p, graph_name(a.run, garm)))["nodes"]
                 except ValueError:
                     nodes = []
-            reader = [{"names": [n]} for n in row["arms"][hyb].get("answers", [])]
-            sc = score_nodes(q, reader + nodes)
+            m = merge(row["arms"][hyb].get("answers", []), nodes, op="count" if q["form"] == "A" else "list",
+                      reader_count=row["arms"][hyb].get("count_pred"))
+            sc = score_nodes(q, m["items"])
             if q["form"] == "A":
-                cnt = len(nodes) if nodes else row["arms"][hyb].get("count_pred")
-                sc["count_pred"] = cnt
-                sc["score"] = 1.0 if cnt == q["gold"]["count"] else 0.0
+                sc["count_pred"] = m["count"]
+                sc["score"] = 1.0 if m["count"] == q["gold"]["count"] else 0.0
             sc["graph_items"] = len(nodes)
             row["arms"][mrg] = sc
         if mrg not in res["arms"]:
