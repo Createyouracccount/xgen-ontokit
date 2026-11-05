@@ -57,17 +57,17 @@ concepts, entities, relations, data = await ext.extract(documents)
 - **단일 소스** — 개선을 XGEN 코드에 인라인 하드코딩하지 않고 라이브러리 한 곳에서 관리. config 스위치로 A/B.
 
 ## 설치
+공개 PyPI 에는 없다 — GitHub 에서 설치한다(커밋 고정 방법: [README 설치](../README.md#설치--의존성으로-추가하기)).
 ```bash
-pip install xgen-ontokit                 # 코어 (의존성 0)
-pip install "xgen-ontokit[korean]"       # + Kiwi 형태소
-pip install "xgen-ontokit[ner]"          # + KoELECTRA NER
-pip install "xgen-ontokit[relation-encoder]"  # + KLUE-RE 관계 인코더(opt-in)
-pip install "xgen-ontokit[english-relations]" # + spaCy 영어 의존 SVO(opt-in)
-pip install "xgen-ontokit[all]"          # 전부
+REPO="git+https://github.com/Createyouracccount/xgen-ontokit.git@<커밋>"
+pip install "xgen-ontokit @ $REPO"                  # 코어 (의존성 0)
+pip install "xgen-ontokit[korean] @ $REPO"          # + Kiwi 형태소
+pip install "xgen-ontokit[ner] @ $REPO"             # + KoELECTRA NER
+pip install "xgen-ontokit[relation-encoder] @ $REPO"  # + KLUE-RE 관계 인코더(opt-in)
+pip install "xgen-ontokit[english-relations] @ $REPO" # + spaCy 영어 의존 SVO(opt-in)
+pip install "xgen-ontokit[all] @ $REPO"             # 전부
 # ⚠️ english-relations 는 spaCy 모델을 따로 받아야 한다(PyPI 패키지 아님):
 #   python -m spacy download en_core_web_sm
-# GitHub 직접:
-pip install "git+https://github.com/<org>/xgen-ontokit.git"
 ```
 
 ## 언어 지원 매트릭스 (v0.16.0, 정직하게)
@@ -198,7 +198,7 @@ edges = col.edges(exclude_pairs=svo_pairs)      # [(a, b, count)] — SVO 기연
 
 ## 관계 인코더 (v0.13) — KLUE-RE + SREDFM-ko 증강, holdout 0.6169 (v13c)
 ```bash
-pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
+pip install "xgen-ontokit[relation-encoder] @ $REPO"  # + transformers·torch ($REPO: 위 설치 절)
 export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # 이 env가 on/off 스위치
 ```
 규칙 조사SVO(KLUE 연결력 0.8%)를 넘는 **로컬 RE 인코더** 채널. klue/roberta-small 파인튜닝, **LLM API 호출 0회**(로컬 추론, NER 과 동일 계열).

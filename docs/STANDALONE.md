@@ -9,8 +9,10 @@ LLM 은 질문을 질의계획으로 바꿀 때만 쓰고(선택), 그래프 생
 ## 1. 설치
 
 ```
-pip install "xgen-ontokit[korean,ner,owl] @ git+https://github.com/Createyouracccount/xgen-ontokit@<태그>"
+pip install "xgen-ontokit[korean,ner,owl] @ git+https://github.com/Createyouracccount/xgen-ontokit.git@<커밋>"
 ```
+
+공개 PyPI 에는 없고 원격 태그도 v0.13.1 까지뿐이라 **커밋 SHA 로 고정**한다([설치 안내](../README.md#설치--의존성으로-추가하기)).
 
 | extra | 무엇을 위해 |
 |---|---|

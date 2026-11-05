@@ -45,17 +45,17 @@ concepts, entities, relations, data = await ext.extract(documents)
   code. A/B via config switch.
 
 ## Install
+Not on public PyPI — install from GitHub (how to pin a commit: [README install](../README.en.md#install--add-as-a-dependency)).
 ```bash
-pip install xgen-ontokit                 # core (zero dependencies)
-pip install "xgen-ontokit[korean]"       # + Kiwi morphology
-pip install "xgen-ontokit[ner]"          # + KoELECTRA NER
-pip install "xgen-ontokit[relation-encoder]"  # + KLUE-RE relation encoder (opt-in)
-pip install "xgen-ontokit[english-relations]" # + spaCy English dependency SVO (opt-in)
-pip install "xgen-ontokit[all]"          # everything
+REPO="git+https://github.com/Createyouracccount/xgen-ontokit.git@<commit>"
+pip install "xgen-ontokit @ $REPO"                  # core (zero dependencies)
+pip install "xgen-ontokit[korean] @ $REPO"          # + Kiwi morphology
+pip install "xgen-ontokit[ner] @ $REPO"             # + KoELECTRA NER
+pip install "xgen-ontokit[relation-encoder] @ $REPO"  # + KLUE-RE relation encoder (opt-in)
+pip install "xgen-ontokit[english-relations] @ $REPO" # + spaCy English dependency SVO (opt-in)
+pip install "xgen-ontokit[all] @ $REPO"             # everything
 # ⚠️ english-relations needs the spaCy model fetched separately (not a PyPI package):
 #   python -m spacy download en_core_web_sm
-# Direct from GitHub:
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
 ```
 
 ## Language support matrix (v0.16.0, stated honestly)
@@ -197,7 +197,7 @@ The figures above are measured on an internal corpus (not external gold).
 
 ## Relation encoder (v0.13) — KLUE-RE + SREDFM-ko augmented, holdout 0.6169 (v13c)
 ```bash
-pip install "xgen-ontokit[relation-encoder]"          # + transformers·torch
+pip install "xgen-ontokit[relation-encoder] @ $REPO"  # + transformers·torch ($REPO: see Install above)
 export ONTOKIT_RELATION_ENCODER_MODEL=/path/to/model_re   # this env is the on/off switch
 ```
 A **local RE encoder** channel that surpasses rule-based particle SVO (KLUE linkage 0.8%).

@@ -108,8 +108,9 @@ and that is what was validated (scorecard above).
 ## Quick start
 
 ```bash
-pip install "xgen-ontokit[korean,ner]"                 # Kiwi morphology + KoELECTRA NER
-pip install "xgen-ontokit[relation-encoder]"           # + local relation encoder (optional)
+# Not on public PyPI — install from GitHub (pinning: see "Install" at the bottom)
+pip install "xgen-ontokit[korean,ner] @ git+https://github.com/Createyouracccount/xgen-ontokit.git@main"   # Kiwi morphology + KoELECTRA NER
+# For the local relation encoder (optional), add it to the extras: [korean,ner,relation-encoder]
 ```
 
 ```python
@@ -131,7 +132,7 @@ concepts, entities, relations, _ = asyncio.run(ext.extract(documents))
 see the [standalone guide (Korean)](docs/STANDALONE.md):
 
 ```bash
-pip install "xgen-ontokit[korean,ner,owl]"
+pip install "xgen-ontokit[korean,ner,owl] @ git+https://github.com/Createyouracccount/xgen-ontokit.git@main"
 ontokit build docs.jsonl -o graph.ttl            # zero LLM calls, source documents attached
 ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","class":"가수"}]}'
 ```
@@ -241,10 +242,12 @@ no PDF/HWP parsing), and all install extras: [overview · design rationale](docs
 ## Install · add as a dependency
 
 ```bash
-pip install xgen-ontokit                       # core (no dependencies)
-pip install "xgen-ontokit[all]"                # everything (Kiwi · NER · relation encoder · English)
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
+REPO="git+https://github.com/Createyouracccount/xgen-ontokit.git@<commit>"
+pip install "xgen-ontokit @ $REPO"             # core (no dependencies)
+pip install "xgen-ontokit[all] @ $REPO"        # everything (Kiwi · NER · relation encoder · English)
 ```
 
-⚠️ The latest tag on the remote is currently **v0.13.1** (v0.14.0–v0.16.0 not pushed) — until they are, the last command fails;
-pin a commit SHA instead (`...xgen-ontokit.git@<commit>`). On-by-default channels have changed across minor versions, so pin a version.
+⚠️ **It is not on public PyPI** (checked 2026-11-05 — `pip install xgen-ontokit` returns 404). The latest tag on the remote is also only **v0.13.1**
+(v0.14.0 and v0.15.0 exist locally only; v0.16.0 has not been created), so `@v0.16.0` fails — **pin a commit SHA** instead.
+Get the latest SHA with `git ls-remote https://github.com/Createyouracccount/xgen-ontokit.git main`. `@main` is a moving name,
+good for trying it out — on-by-default channels have changed across minor versions, so pin when adding it as a dependency. Once tags are pushed, switch to `@v0.x.y`.

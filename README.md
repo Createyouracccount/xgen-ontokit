@@ -102,8 +102,9 @@
 ## 빠른 시작
 
 ```bash
-pip install "xgen-ontokit[korean,ner]"                 # Kiwi 형태소 + KoELECTRA NER
-pip install "xgen-ontokit[relation-encoder]"           # + 로컬 관계 인코더(선택)
+# 공개 PyPI 에는 없다 — GitHub 에서 설치한다(버전 고정은 맨 아래 "설치")
+pip install "xgen-ontokit[korean,ner] @ git+https://github.com/Createyouracccount/xgen-ontokit.git@main"   # Kiwi 형태소 + KoELECTRA NER
+# 로컬 관계 인코더(선택)를 쓰려면 extras 에 relation-encoder 를 더한다: [korean,ner,relation-encoder]
 ```
 
 ```python
@@ -124,7 +125,7 @@ concepts, entities, relations, _ = asyncio.run(ext.extract(documents))
 **그래프 → 질의 → 병합**(L02 에서 검증된 경로)도 서버·도커 없이 라이브러리로 돈다 — 상세는 [독립 실행](docs/STANDALONE.md):
 
 ```bash
-pip install "xgen-ontokit[korean,ner,owl]"
+pip install "xgen-ontokit[korean,ner,owl] @ git+https://github.com/Createyouracccount/xgen-ontokit.git@main"
 ontokit build docs.jsonl -o graph.ttl            # LLM 0회. 출처 문서 포함
 ontokit query graph.ttl '{"op":"list","return":"x","where":[{"t":"isa","v":"x","class":"가수"}]}'
 ```
@@ -232,10 +233,12 @@ docs/                     # 채널 상세(CHANNELS.md), README 그림(img/, make
 ## 설치 · 의존성으로 추가하기
 
 ```bash
-pip install xgen-ontokit                       # 코어(의존성 0)
-pip install "xgen-ontokit[all]"                # 전부(Kiwi·NER·관계 인코더·영어)
-pip install "git+https://github.com/Createyouracccount/xgen-ontokit.git@v0.16.0"
+REPO="git+https://github.com/Createyouracccount/xgen-ontokit.git@<커밋>"
+pip install "xgen-ontokit @ $REPO"             # 코어(의존성 0)
+pip install "xgen-ontokit[all] @ $REPO"        # 전부(Kiwi·NER·관계 인코더·영어)
 ```
 
-⚠️ 원격에 올라간 최신 태그는 현재 **v0.13.1** 이다(v0.14.0~v0.16.0 미푸시) — 태그가 올라가기 전에는 마지막 명령이 실패하므로
-커밋 SHA 로 고정한다(`...xgen-ontokit.git@<commit>`). 기본 on 채널이 마이너 버전에서 바뀐 이력이 있어 버전 고정을 권장한다.
+⚠️ **공개 PyPI 에는 올라가 있지 않다**(2026-11-05 확인 — `pip install xgen-ontokit` 은 404). 원격에 올라간 최신 태그도 **v0.13.1** 뿐이다
+(v0.14.0·v0.15.0 은 로컬에만 있고 v0.16.0 은 아직 만들지 않았다) — 그래서 `@v0.16.0` 은 실패하고 **커밋 SHA 로 고정**한다.
+최신 SHA 는 `git ls-remote https://github.com/Createyouracccount/xgen-ontokit.git main` 으로 얻는다. `@main` 은 움직이는 이름이라
+시험용이다 — 기본 on 채널이 마이너 버전에서 바뀐 이력이 있어 의존성으로 넣을 때는 고정을 권장한다. 태그가 원격에 올라가면 `@v0.x.y` 로 바꾼다.
